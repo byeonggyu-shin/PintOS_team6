@@ -97,7 +97,6 @@ struct thread {
 
 	/* Alarm clock */
 	int64_t wakeup_time;				/* Time to wake this thread up */
-	struct list_elem timer_elem;		/* Element in timer_wait_list */
 	
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
