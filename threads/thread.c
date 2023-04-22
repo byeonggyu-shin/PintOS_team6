@@ -72,7 +72,7 @@ static tid_t allocate_tid (void);
  * always at the beginning of a page and the stack pointer is
  * somewhere in the middle, this locates the curent thread. */
 #define running_thread() ((struct thread *) (pg_round_down (rrsp ())))
-
+bool is_prior (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
 
 // Global descriptor table for the thread_start.
 // Because the gdt will be setup after the thread_init, we should
@@ -240,7 +240,8 @@ thread_unblock (struct thread *t) {
 
 	old_level = intr_disable ();
 	ASSERT (t->status == THREAD_BLOCKED);
-	list_push_back (&ready_list, &t->elem);
+	/*list_push_back (&ready_list, &t->elem); */
+	list_insert_ordered (&ready_list, &t->elem, (list_less_func *) &is_prior, NULL);
 	t->status = THREAD_READY;
 	intr_set_level (old_level);
 }
@@ -318,6 +319,18 @@ thread_set_priority (int new_priority) {
 int
 thread_get_priority (void) {
 	return thread_current ()->priority;
+}
+/* a, b(thread->list_elems) 우선순위 비교 후 a가 우선순위가 높다면 True else False */
+bool
+is_prior (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+{// list_entry : offsetof(TYPE,MEMBER)로 elem이 얼마나 떨어져있는지 구함
+ // 			 그러면 a가 가르키는 리스트 요소의 next 포인터에서 위에서 구한 값을 빼서
+ // 			 구조체 시작 주소를 얻음, uint8_t 포인터 산술로 포인터 간 거리를
+ //				 바이트 단위로 계산 해 struct thread*로 캐스팅 해서 반환
+  struct thread *t_a = list_entry (a, struct thread, elem);
+  struct thread *t_b = list_entry (b, struct thread, elem);
+  if (t_a->priority > t_b->priority) return true;
+  return false;
 }
 
 /* Sets the current thread's nice value to NICE. */
