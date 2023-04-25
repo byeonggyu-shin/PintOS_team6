@@ -198,6 +198,7 @@ list_push_front (struct list *list, struct list_elem *elem) {
 
 /* Inserts ELEM at the end of LIST, so that it becomes the
    back in LIST. */
+/* LIST의 맨 끝에 ELM을 삽입하여 LIST의 뒤에 ELM을 삽입 */
 void
 list_push_back (struct list *list, struct list_elem *elem) {
 	list_insert (list_end (list), elem);
@@ -415,6 +416,8 @@ list_sort (struct list *list, list_less_func *less, void *aux) {
 /* Inserts ELEM in the proper position in LIST, which must be
    sorted according to LESS given auxiliary data AUX.
    Runs in O(n) average case in the number of elements in LIST. */
+/* LESS에 지정된 보조 데이터 AUX에 따라 정렬해야 하는 LIST의 적절한 위치에 ELM을 삽입
+	LIST의 요소 숫자의 O(n) 평균케이스로 실행 */
 void
 list_insert_ordered (struct list *list, struct list_elem *elem,
 		list_less_func *less, void *aux) {

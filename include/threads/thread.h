@@ -167,4 +167,10 @@ void thread_awake (int64_t ticks);               /* Sleep queue에서 깨워야 
 void update_next_tick_to_awake (int64_t ticks);      /* Thread들이 가진 tick 값에서 최소 값을 저장 */
 int64_t get_next_tick_to_awake (void);               /* 최소 tick값을 반환 */
 
+/* Priority Scheduling */
+/* 현재 수행중인 스레드와 가장 높은 우선순위의 스레드의 우선순위를 비교하여 스케줄링 */
+void test_max_priority (void);   
+/* 인자로 주어진 스레드들의 우선순위를 비교 */   
+bool cmp_priority (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+
 #endif /* threads/thread.h */

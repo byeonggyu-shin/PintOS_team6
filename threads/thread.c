@@ -207,9 +207,20 @@ thread_print_stats (void) {
    The code provided sets the new thread's `priority' member to
    PRIORITY, but no actual priority scheduling is implemented.
    Priority scheduling is the goal of Problem 1-3. */
-tid_t
-thread_create (const char *name, int priority,
-		thread_func *function, void *aux) {
+/* 지정된 초기 우선 순위를 사용하여 NAME이라는 새 커널 스레드를 생성합니다. 
+이 스레드는 인수로 AUX를 전달하는 FUNCTION을 실행하고 준비 대기열에 추가합니다.
+새 스레드에 대한 스레드 식별자를 반환하거나 생성이 실패할 경우 TID_ERROR를 반환합니다.
+
+thread_start()가 호출된 경우 sread_create()가 반환되기 전에 새 스레드가 예약될 수 있습니다.
+
+thread_create()가 반환하기 전에 종료할 수도 있습니다.
+반대로 원래 스레드는 새 스레드가 예약되기 전에 임의의 시간 동안 실행될 수 있습니다. 순서를 지정해야 할 경우 세마포 또는 다른 형식의 동기화를 사용합니다.
+
+제공된 코드는 새 스레드의 '우선 순위' 멤버를 우선 순위로 설정하지만 실제 우선 순위 스케줄링은 구현되지 않습니다.
+우선순위 스케줄링은 문제 1-3의 목표입니다. */
+/* 새로운 스레드를 생성하고 초기화하는 함수 */
+tid_t      
+thread_create (const char *name, int priority, thread_func *function, void *aux) {
 	struct thread *t;
 	tid_t tid;
 
@@ -237,7 +248,8 @@ thread_create (const char *name, int priority,
 
 	/* Add to run queue. */
 	thread_unblock (t);
-
+	test_max_priority ();
+	
 	return tid;
 }
 
@@ -263,16 +275,35 @@ thread_block (void) {
    be important: if the caller had disabled interrupts itself,
    it may expect that it can atomically unblock a thread and
    update other data. */
+/* 차단된 스레드 T를 실행 준비 상태로 전환합니다.
+	T가 차단되지 않은 경우 오류입니다. 
+	(실행 중인 스레드를 준비하려면 thread_yield()를 사용합니다.)
+
+이 함수는 실행 중인 스레드를 선점하지 않습니다.
+이것은 중요할 수 있습니다. 호출자가 인터럽트 자체를 비활성화한 경우 스레드를 원자적으로 차단 해제하고 다른 데이터를 업데이트할 수 있습니다. */
 void
 thread_unblock (struct thread *t) {
+	/* 인터럽트 레벨을 저장할 변수를 선언, 변수는 후에 인터럽트를 복원할 때 사용 */
 	enum intr_level old_level;
-
+	/* t가 유효한 스레드인지 확인, 검사를 통해 무효한 스레드 포인터가 함수에 전달되는 것을 방지 */
 	ASSERT (is_thread (t));
-
+	/* 인터럽트를 비활성화하고 이전 인터럽트 레벨을 old_level에 저장 
+		스레드 상태 변경 과정 중 인터럽트가 발생하지 않도록 보장 */
 	old_level = intr_disable ();
+	/* 스레드 t의 상태가 블록되었는지 확인 
+	검사를 통해 이미 블록되지 않은 스레드에 대해 함수가 호출되는 것을 방지*/
 	ASSERT (t->status == THREAD_BLOCKED);
-	list_push_back (&ready_list, &t->elem);
+
+		// /* 블록된 스레드 t를 ready_list에 추가 
+		// 스케줄러가 다음 실행할 스레드를 선택할 때 고려함*/
+		// list_push_back (&ready_list, &t->elem);		
+		
+	/* 우선순위 비교후 삽입 */
+	list_insert_ordered(&ready_list, &t->elem, cmp_priority, 0);
+	/* 스레드 t의 상태를 대기(THREAD_READY) 상태로 변경 */
 	t->status = THREAD_READY;
+	/* 인터럽트 레벨을 이전 상태인 old_level로 복원
+		함수 실행 전 인터럽트 설정이 복원되어 인터럽트가 다시 발생할 수 있게 됨*/
 	intr_set_level (old_level);
 }
 
@@ -324,7 +355,7 @@ thread_exit (void) {
 }
 
 /* Yields the CPU.  The current thread is not put to sleep and
-   may be scheduled again immediately at the scheduler's whim. */
+   may be scheduled again immediately at the schedule-r's whim. */
 /* CPU 반환, 현재 스레드는 sleep으로 전환되지 않으며 스케줄러에 따라 즉시 다시 예약될 수 있습니다*/
 void
 thread_yield (void) {
@@ -336,14 +367,18 @@ thread_yield (void) {
 	old_level = intr_disable ();              		 /* 현재 인터럽트 레벨을 비활성화하고, 이전 인터럽트 레벨을 old_level에 저장
 																										이렇게 하여 스레드 전환 과정 중 인터럽트가 발생하지 않도록 함 */
 	if (curr != idle_thread) 											 /* 현재 스레드가 유휴 스레드가 아닌 경우 다음 단계를 수행 */
-		list_push_back (&ready_list, &curr->elem);   /* 현재 스레드를 준비 리스트에 추가, 다른 스레드가 실행될 수 있는 기회를 제공 */
+	{
+		// list_push_back (&ready_list, &curr->elem);   /* 현재 스레드를 준비 리스트에 추가, 다른 스레드가 실행될 수 있는 기회를 제공 */
+		list_insert_ordered(&ready_list,&cur->elem, cmp_priority, 0)
+	}	
 	do_schedule (THREAD_READY);										 /* 스케줄러를 호출하여 다음 실행할 스레드를 선택, 현재 스레드를 양보 */
 	intr_set_level (old_level);									   /* 이전 인터럽트 레벨을 복원, 인터럽트가 다시 발생할 수 있게 됩 */
 }
 
-// 커널은 타이머 대기 중인 스레드의 깨우기 목표 틱 중에서
-// 가장 빨리 도래하는 스레드의 깨우기 목표 틱을 계속 유지합니다.
-// 그 값을 갱신합니다.
+/**
+ *  커널은 타이머 대기 중인 스레드의 깨우기 목표 틱 중에서 
+ * 가장 빨리 도래하는 스레드의 깨우기 목표 틱을 계속 유지합니다. 값을 갱신합니다.
+*/ 
 void
 update_next_tick_to_awake (int64_t tick)
 {
@@ -366,25 +401,19 @@ thread_sleep (int64_t tick)
 {
   struct thread *cur;
   enum intr_level old_level;
-
-  // 인터럽트를 금지하고, 이전 인터럽트 레벨을 저장합니다.
+  /* 이전 인터럽트 레벨을 저장 */
   old_level = intr_disable ();
   cur = thread_current ();
-
-  // idle 스레드는 sleep되지 않아야 하며,
-  // 해당 스레드 코드는 이 함수를 호출하지 않습니다.
+  /* idle 스레드는 sleep되지 않아야 하며,
+  	 해당 스레드 코드는 이 함수를 호출하지 않습니다.*/ 
   ASSERT (cur != idle_thread);
-
-  // 아무 스레드를 깨워야 하는 가장 이른 틱을 갱신합니다.
+  /* 아무 스레드를 깨워야 하는 가장 이른 틱 갱신 */ 
   update_next_tick_to_awake (cur->wakeup_tick = tick);
-
-  // 타이머 대기 리스트에 이 스레드를 추가합니다.
+  /* 타이머 대기 리스트에 이 스레드를 추가 */ 
   list_push_back (&sleep_list, &cur->elem);
-
-  // 이 스레드를 블락하고 다시 스케줄될 때까지 블락된 상태로 대기합니다.
+  /* 이 스레드를 블락하고 다시 스케줄될 때까지 블락된 상태로 대기 */
   thread_block ();
-
-  // 인터럽트 레벨을 처음 상태로 되돌립니다.
+  /* 인터럽트 레벨을 처음 상태 재할당 */ 
   intr_set_level (old_level);
 }
 
@@ -420,10 +449,36 @@ thread_awake (int64_t current_tick)
     }
 }
 
+
+bool cmp_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED) {
+    struct thread *thread_a = list_entry(a, struct thread, elem);
+    struct thread *thread_b = list_entry(b, struct thread, elem);
+
+    /* 첫 번째 스레드의 우선순위가 더 높은 경우 true 반환 */ 
+    return thread_a->priority > thread_b->priority;
+}
+
+void test_max_priority(void) {
+    struct thread *current_thread = thread_current();
+    struct thread *highest_priority_thread;
+
+    /* ready_list에서 가장 높은 우선순위를 가진 스레드 찾기 */ 
+    struct list_elem *max_elem = list_max(&ready_list, cmp_priority, NULL);
+    highest_priority_thread = list_entry(max_elem, struct thread, elem);
+
+    /* 현재 스레드의 우선순위와 가장 높은 우선순위를 가진 스레드 비교 */ 
+    if (current_thread->priority < highest_priority_thread->priority) {
+        /* 현재 스레드의 우선순위가 더 낮은 경우, 스케줄링 */ 
+        thread_yield();
+    }
+}
+
+
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
 thread_set_priority (int new_priority) {
 	thread_current ()->priority = new_priority;
+	test_max_priority ();
 }
 
 /* Returns the current thread's priority. */
@@ -528,6 +583,10 @@ init_thread (struct thread *t, const char *name, int priority) {
    empty.  (If the running thread can continue running, then it
    will be in the run queue.)  If the run queue is empty, return
    idle_thread. */
+/* 예약할 다음 스레드를 선택하고 반환합니다.
+실행 대기열이 비어 있지 않은 경우 실행 대기열에서 스레드를 반환해야 합니다. 
+(실행 중인 스레드가 계속 실행될 수 있으면 실행 대기열에 있게 됩니다.)
+실행 대기열이 비어 있으면 idle_thread를 반환합니다. */
 static struct thread *
 next_thread_to_run (void) {
 	if (list_empty (&ready_list))
