@@ -54,6 +54,7 @@ is_tail (struct list_elem *elem) {
 }
 
 /* Initializes LIST as an empty list. */
+/* LIST를 빈 목록으로 초기화 */
 void
 list_init (struct list *list) {
 	ASSERT (list != NULL);
@@ -153,6 +154,8 @@ list_tail (struct list *list) {
 /* Inserts ELEM just before BEFORE, which may be either an
    interior element or a tail.  The latter case is equivalent to
    list_push_back(). */
+/* 내부 요소 또는 테일일 수 있는 ELEM을 BEFORE 바로 앞에 삽입
+후자의 경우는 list_push_back()과 같습니다.  */
 void
 list_insert (struct list_elem *before, struct list_elem *elem) {
 	ASSERT (is_interior (before) || is_tail (before));

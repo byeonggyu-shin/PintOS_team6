@@ -41,6 +41,7 @@
 
    - up or "V": increment the value (and wake up one waiting
    thread, if any). */
+/* 세마포어 SEMA를 VALUE로 초기화 */
 void
 sema_init (struct semaphore *sema, unsigned value) {
 	ASSERT (sema != NULL);
@@ -56,21 +57,24 @@ sema_init (struct semaphore *sema, unsigned value) {
    interrupt handler.  This function may be called with
    interrupts disabled, but if it sleeps then the next scheduled
    thread will probably turn interrupts back on. This is
-   sema_down function. */
+   sema_down function. */	 
 void
 sema_down (struct semaphore *sema) {
-	enum intr_level old_level;
+	enum intr_level old_level;        /* 인터럽트 레벨(enum)을 저장 */
 
-	ASSERT (sema != NULL);
-	ASSERT (!intr_context ());
+	ASSERT (sema != NULL);            /* 세마포어 포인터가 널(NULL)이 아님을 확인 */
+	ASSERT (!intr_context ());				/* 인터럽트 컨텍스트 내에서 호출되지 않았음을 확인 */
 
-	old_level = intr_disable ();
-	while (sema->value == 0) {
-		list_push_back (&sema->waiters, &thread_current ()->elem);
-		thread_block ();
+	old_level = intr_disable ();      /* 현재 인터럽트 레벨을 비활성화하고, 이전 인터럽트 레벨을 old_level에 저장 */
+	while (sema->value == 0) {        /* 세마포어 값이 0인 동안 실행 */
+
+		// list_push_back (&sema->waiters, &thread_current ()->elem);   /* 현재 스레드의 elem을 세마포어의 대기자 목록에 추가 */
+
+		list_insert_ordered(&sema->waiters, &thread_current()->elem, cmp_priority, 0);
+		thread_block ();                /* 현재 스레드를 block, 다른 스레드가 실행 */
 	}
-	sema->value--;
-	intr_set_level (old_level);
+	sema->value--;                    /* 세마포어의 값을 원자적으로 감소 */
+	intr_set_level (old_level);       /* 이전 인터럽트 레벨을 복원 */
 }
 
 /* Down or "P" operation on a semaphore, but only if the
@@ -102,18 +106,21 @@ sema_try_down (struct semaphore *sema) {
    and wakes up one thread of those waiting for SEMA, if any.
 
    This function may be called from an interrupt handler. */
+/* 공유자원 사용 완료 후 V ,signal 실행해서 다음 스레드 깨우는 함수*/
 void
 sema_up (struct semaphore *sema) {
-	enum intr_level old_level;
+	enum intr_level old_level;           /* 인터럽트 레벨(enum)을 저장 */
 
-	ASSERT (sema != NULL);
+	ASSERT (sema != NULL);               /* 세마포어 포인터가 널(NULL)이 아님을 확인 */
 
-	old_level = intr_disable ();
-	if (!list_empty (&sema->waiters))
-		thread_unblock (list_entry (list_pop_front (&sema->waiters),
-					struct thread, elem));
-	sema->value++;
-	intr_set_level (old_level);
+	old_level = intr_disable ();         /* 현재 인터럽트 레벨을 비활성화하고, 이전 인터럽트 레벨을 old_level에 저장 */
+	if (!list_empty (&sema->waiters))    /* 세마포어의 대기자 목록이 비어있지 않은 경우에만 실행 */
+		{  /* 대기자 목록에서 가장 앞에 있는 스레드를 꺼내어 차단 해제(unblock)하고 실행을 재개 */
+			list_sort(&sema->waiters, cmp_priority, 0);
+			thread_unblock (list_entry (list_pop_front (&sema->waiters), struct thread, elem));
+		}
+	sema->value++;                       /* 세마포어의 값을 증가 */
+	intr_set_level (old_level);          /* 이전 인터럽트 레벨을 복원 */
 }
 
 static void sema_test_helper (void *sema_);
@@ -150,7 +157,7 @@ sema_test_helper (void *sema_) {
 		sema_up (&sema[1]);
 	}
 }
-
+
 /* Initializes LOCK.  A lock can be held by at most a single
    thread at any given time.  Our locks are not "recursive", that
    is, it is an error for the thread currently holding a lock to
@@ -198,8 +205,12 @@ lock_acquire (struct lock *lock) {
 
    This function will not sleep, so it may be called within an
    interrupt handler. */
+/* LOCK을 획득하려고 시도하고 성공하면 true를 반환하고 실패하면 false를 반환
+	잠금이 현재 스레드에 의해 아직 유지되지 않아야 함
+
+이 기능은 sleep 으로 전환되지 않으므로 인터럽트 핸들러 내에서 호출될 수 있음*/
 bool
-lock_try_acquire (struct lock *lock) {
+lock_try_acquire (struct lock *lock) { 
 	bool success;
 
 	ASSERT (lock != NULL);
@@ -272,6 +283,7 @@ cond_init (struct condition *cond) {
    interrupt handler.  This function may be called with
    interrupts disabled, but interrupts will be turned back on if
    we need to sleep. */
+/* 조건 변수에서 대기하는 스레드를 설정 -> condition variable의 waiters list에 우선순위 순서로 삽입되도록 수정 */
 void
 cond_wait (struct condition *cond, struct lock *lock) {
 	struct semaphore_elem waiter;
@@ -280,9 +292,10 @@ cond_wait (struct condition *cond, struct lock *lock) {
 	ASSERT (lock != NULL);
 	ASSERT (!intr_context ());
 	ASSERT (lock_held_by_current_thread (lock));
+	sema_init (&waiter.semaphore, 0);      /* waiter를 cond의 waiters 리스트에 추가 */
 
-	sema_init (&waiter.semaphore, 0);
-	list_push_back (&cond->waiters, &waiter.elem);
+	// list_push_back (&cond->waiters, &waiter.elem);
+	list_insert_ordered (&cond->waiters, &waiter.elem, cmp_sema_priority,0);
 	lock_release (lock);
 	sema_down (&waiter.semaphore);
 	lock_acquire (lock);
@@ -295,6 +308,7 @@ cond_wait (struct condition *cond, struct lock *lock) {
    An interrupt handler cannot acquire a lock, so it does not
    make sense to try to signal a condition variable within an
    interrupt handler. */
+/* 조건 변수에서 대기 중인 스레드 중 하나를 깨우는 역할 -> condition variable의 waiters list를 우선순위로 재 정렬 */
 void
 cond_signal (struct condition *cond, struct lock *lock UNUSED) {
 	ASSERT (cond != NULL);
@@ -303,8 +317,8 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED) {
 	ASSERT (lock_held_by_current_thread (lock));
 
 	if (!list_empty (&cond->waiters))
-		sema_up (&list_entry (list_pop_front (&cond->waiters),
-					struct semaphore_elem, elem)->semaphore);
+		list_sort(&cond->waiters, cmp_sema_priority, 0 );
+		sema_up (&list_entry (list_pop_front (&cond->waiters),struct semaphore_elem, elem)->semaphore);
 }
 
 /* Wakes up all threads, if any, waiting on COND (protected by
@@ -321,3 +335,21 @@ cond_broadcast (struct condition *cond, struct lock *lock) {
 	while (!list_empty (&cond->waiters))
 		cond_signal (cond, lock);
 }
+
+/**
+ * semaphore_elem으로부터 각 semaphore_elem의 쓰레드 디스크립터를 획득
+ * 첫 번째 인자의 우선순위가 두 번째 인자의 우선순위보다 높으면 1을 반환 낮으면 0을 반환
+*/
+bool cmp_sema_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED){
+  /* a와 b 세마포어 요소에서 각각 스레드 구조체 포인터를 획득 */
+  struct thread *thread_a = list_entry(a, struct semaphore_elem, elem)->semaphore.waiters.head.next;
+  struct thread *thread_b = list_entry(b, struct semaphore_elem, elem)->semaphore.waiters.head.next;
+
+  /* 스레드 디스크립터에서 각 스레드의 우선순위를 할당 */ 
+  int priority_a = thread_a->priority;
+  int priority_b = thread_b->priority;
+
+  /* 첫 번째 인자의 우선순위가 두 번째 인자의 우선순위보다 높으면 1을 반환하고, 그렇지 않으면 0을 반환 */ 
+  return priority_a > priority_b;
+}
+
