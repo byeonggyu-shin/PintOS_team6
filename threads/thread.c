@@ -369,7 +369,7 @@ thread_yield (void) {
 	if (curr != idle_thread) 											 /* 현재 스레드가 유휴 스레드가 아닌 경우 다음 단계를 수행 */
 	{
 		// list_push_back (&ready_list, &curr->elem);   /* 현재 스레드를 준비 리스트에 추가, 다른 스레드가 실행될 수 있는 기회를 제공 */
-		list_insert_ordered(&ready_list,&cur->elem, cmp_priority, 0)
+		list_insert_ordered(&ready_list,&curr->elem, cmp_priority, 0);
 	}	
 	do_schedule (THREAD_READY);										 /* 스케줄러를 호출하여 다음 실행할 스레드를 선택, 현재 스레드를 양보 */
 	intr_set_level (old_level);									   /* 이전 인터럽트 레벨을 복원, 인터럽트가 다시 발생할 수 있게 됩 */
