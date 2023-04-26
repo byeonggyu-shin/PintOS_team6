@@ -59,6 +59,7 @@ void cond_broadcast (struct condition *, struct lock *);
 우선순위의 스레드와 비교 */
 bool cmp_sema_priority (const struct list_elem *a, const struct list_elem *b, void *aux );
 bool cmp_donator_priority (const struct list_elem *new, const struct list_elem *existing, void *aux );
+
 /* Optimization barrier.
  *
  * The compiler will not reorder operations across an

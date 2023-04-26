@@ -37,7 +37,7 @@ static struct list sleep_list;
 
 /* 리스트의 sleep_list의 스레드에서 가장 이른 next_tick_to_awake
  만약 타이머 대기 중인 스레드가 없다면 INT64_MAX로 지정 */
-static int64_t next_tick_to_awake = INT64_MAX;
+static int64_t next_tick_to_awake;
 
 /* Idle thread. */
 static struct thread *idle_thread;
@@ -138,6 +138,7 @@ thread_init (void) {
 	list_init (&destruction_req);
 
 	list_init (&sleep_list);
+	next_tick_to_awake = INT64_MAX;
 
 	/* Set up a thread structure for the running thread. */
 	initial_thread = running_thread ();
@@ -383,7 +384,7 @@ thread_yield (void) {
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
 thread_set_priority (int new_priority) {
-	thread_current ()->priority = new_priority;
+	thread_current ()-> original_priority = new_priority;
 
 	refresh_priority();
 	test_max_priority();	
@@ -486,8 +487,8 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->magic = THREAD_MAGIC;
 	/* priority */
 	t->original_priority = priority;
-	t->lock_to_wait_on = NULL;
 	list_init(&t->donators_list);
+	t->lock_to_wait_on = NULL;
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
@@ -683,7 +684,7 @@ thread_sleep (int64_t tick)
 
   /* idle 스레드는 sleep되지 않아야 하며,
   	 해당 스레드 코드는 이 함수를 호출하지 않습니다.*/ 
-  ASSERT (cur != idle_thread);
+  ASSERT (!intr_context ());
 
   /* 이전 인터럽트 레벨을 저장 */
   old_level = intr_disable ();
@@ -691,7 +692,7 @@ thread_sleep (int64_t tick)
 	cur->wakeup_tick = tick;
 
   /* 아무 스레드를 깨워야 하는 가장 이른 틱 갱신 */ 
-  update_next_tick_to_awake (cur->wakeup_tick = tick);
+  update_next_tick_to_awake (tick);
   /* 타이머 대기 리스트에 이 스레드를 추가 */ 
 	if (cur != idle_thread){
   	list_push_back (&sleep_list, &cur->elem);
@@ -735,8 +736,9 @@ thread_awake(int64_t current_tick)
 void
 update_next_tick_to_awake (int64_t tick)
 {
-  // 지금 들어온 값이 더 빠르면, 갱신합니다.
-  next_tick_to_awake = (next_tick_to_awake > tick) ? tick : next_tick_to_awake;
+  	if (tick < next_tick_to_awake) {
+		next_tick_to_awake = tick;
+	}
 }
 
 // update_next_tick_to_awake에서 설명한 틱 값을 반환합니다.
@@ -746,7 +748,9 @@ get_next_tick_to_awake (void)
   return next_tick_to_awake;
 }
 
-
+/**
+ * 스레드의 우선순위를 비교하고, 첫 번째 인자의 우선순위가 높으면 1을 반환하고, 그렇지 않으면 0을 반환
+*/
 bool cmp_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED) {
 	struct thread *thread_a = list_entry(a, struct thread, elem);
 	struct thread *thread_b = list_entry(b, struct thread, elem);
@@ -754,6 +758,9 @@ bool cmp_priority(const struct list_elem *a, const struct list_elem *b, void *au
 	return thread_a->priority > thread_b->priority ? 1 : 0;
 }
 
+/**
+ * 스레드를 비교하여, 현재 스레드의 우선순위가 더 낮을 경우 스레드 교체
+*/
 void test_max_priority(void) {
 	struct thread *current_thread = running_thread();
 	struct thread *highest_priority_thread;

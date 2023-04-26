@@ -96,8 +96,9 @@ sema_try_down (struct semaphore *sema) {
 		sema->value--;
 		success = true;
 	}
-	else
+	else {
 		success = false;
+	}
 	intr_set_level (old_level);
 
 	return success;
@@ -123,7 +124,6 @@ sema_up (struct semaphore *sema) {
 			thread_unblock (list_entry (list_pop_front (&sema->waiters), struct thread, elem));
 		}
 	sema->value++;                       /* 세마포어의 값을 증가 */
-
 	test_max_priority();
 	intr_set_level (old_level);          /* 이전 인터럽트 레벨을 복원 */
 }
@@ -336,7 +336,7 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED) {
 	ASSERT (lock_held_by_current_thread (lock));
 
 	if (!list_empty (&cond->waiters))
-		list_sort(&cond->waiters, cmp_sema_priority, 0);
+		list_sort(&cond->waiters, cmp_sema_priority, NULL);
 		sema_up (&list_entry (list_pop_front (&cond->waiters),struct semaphore_elem, elem)->semaphore);
 }
 
