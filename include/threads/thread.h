@@ -95,9 +95,17 @@ struct thread {
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
 
-	/* Alarm clock */
-	int64_t wakeup_time;				/* Time to wake this thread up */
-	
+	/* tick in which this thread needs to wake up */
+	int64_t wakeup_tick;
+
+	int original_priority;
+	struct lock *lock_to_wait_on;
+	/* list of threads that have donated their priorities to this thread */
+	/* priority를 donate한 스레드의 리스트 */
+	struct list donators_list;           
+	/* priority를 donate한 스레드들의 리스트를 관리하기 위한 element
+		우선 순위를 donate한 스레드의 donations 리스트에 연결*/
+	struct list_elem d_elem; 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
 	uint64_t *pml4;                     /* Page map level 4 */
@@ -145,5 +153,21 @@ int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
 void do_iret (struct intr_frame *tf);
+
+void thread_sleep(int64_t ticks); /* 실행 중인 thread를 슬립으로 만듦 */
+void thread_awake(int64_t ticks); /* sleep_list에서 꺠워야 할 thread를 깨움 */
+void update_next_tick_to_awake(int64_t ticks); /* 최소 틱을 가진 thread 저장 */
+int64_t get_next_tick_to_awake(void); /* thread.c의 next_tick_to_awake 반환 */
+
+
+/* If the newly created thread has a higher priority than the running thread,
+   then the current running thread yields.
+ */
+void test_max_priority(void);
+bool cmp_priority (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+
+void donate_priority(void);
+void remove_with_lock(struct lock *lock);
+void refresh_priority(void);
 
 #endif /* threads/thread.h */
