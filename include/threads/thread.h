@@ -85,21 +85,6 @@ typedef int tid_t;
  * only because they are mutually exclusive: only a thread in the
  * ready state is on the run queue, whereas only a thread in the
  * blocked state is on a semaphore wait list. */
-
- 
-
-/*
-	1. `struct thread'가 너무 커져서는 안 됨. 이 경우 커널 스택을 위한 공간이 충분하지 않음
-	우리의 기본 'struct thread'는 크기가 몇 바이트에 불과합니다. 1kB 미만으로 유지되어야 함
-	2. 둘째, 커널 스택이 너무 커져서는 안 됩니다. 스택이 오버플로되면 스레드 상태가 손상됩니다. 
-	따라서 커널 함수는 큰 구조나 배열을 정적이 아닌 로컬 변수로 할당해서는 안 됩니다. 
-	대신 malloc() 또는 palloc_get_page()와 함께 동적 할당을 사용합니다.
-
- 이러한 문제 중 하나의 첫 번째 증상은 아마도 실행 중인 스레드의 'struct thread'의 'magic' 멤버가 TRADE_MAGIC으로 설정되었는지 확인하는 thread_current()의 어설션 오류일 것입니다. 
- 스택 오버플로는 일반적으로 이 값을 변경하여 어설션을 트리거합니다. 
-`elem' 멤버는 이중적인 목적을 가지고 있습니다. 실행 대기열(thread.c)의 요소이거나 세마포 대기 목록(synch.c)의 요소일 수 있습니다. 
-준비 상태의 스레드만 실행 대기열에 있고 차단된 상태의 스레드만 세마포 대기 목록에 있기 때문에 이 두 가지 방법만 사용할 수 있습니다. */
-
 struct thread {
 	/* Owned by thread.c. */
 	tid_t tid;                          /* Thread identifier. */
@@ -107,12 +92,20 @@ struct thread {
 	char name[16];                      /* Name (for debugging purposes). */
 	int priority;                       /* Priority. */
 
-	/* 추가된 속성 */
-	int64_t wakeup_tick;
-
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
 
+	/* tick in which this thread needs to wake up */
+	int64_t wakeup_tick;
+
+	int original_priority;
+	struct lock *lock_to_wait_on;
+	/* list of threads that have donated their priorities to this thread */
+	/* priority를 donate한 스레드의 리스트 */
+	struct list donators_list;           
+	/* priority를 donate한 스레드들의 리스트를 관리하기 위한 element
+		우선 순위를 donate한 스레드의 donations 리스트에 연결*/
+	struct list_elem d_elem; 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
 	uint64_t *pml4;                     /* Page map level 4 */
@@ -161,16 +154,20 @@ int thread_get_load_avg (void);
 
 void do_iret (struct intr_frame *tf);
 
-/* ----------- P-1 Alarm clock ------------ */
-void thread_sleep (int64_t ticks);               /* Thread를 blocked 상태로 만들고 sleep queue에 삽입하여 대기 */
-void thread_awake (int64_t ticks);               /* Sleep queue에서 깨워야 할 thread를 찾아서 wake */
-void update_next_tick_to_awake (int64_t ticks);      /* Thread들이 가진 tick 값에서 최소 값을 저장 */
-int64_t get_next_tick_to_awake (void);               /* 최소 tick값을 반환 */
+void thread_sleep(int64_t ticks); /* 실행 중인 thread를 슬립으로 만듦 */
+void thread_awake(int64_t ticks); /* sleep_list에서 꺠워야 할 thread를 깨움 */
+void update_next_tick_to_awake(int64_t ticks); /* 최소 틱을 가진 thread 저장 */
+int64_t get_next_tick_to_awake(void); /* thread.c의 next_tick_to_awake 반환 */
 
-/* Priority Scheduling */
-/* 현재 수행중인 스레드와 가장 높은 우선순위의 스레드의 우선순위를 비교하여 스케줄링 */
-void test_max_priority (void);   
-/* 인자로 주어진 스레드들의 우선순위를 비교 */   
+
+/* If the newly created thread has a higher priority than the running thread,
+   then the current running thread yields.
+ */
+void test_max_priority(void);
 bool cmp_priority (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+
+void donate_priority(void);
+void remove_with_lock(struct lock *lock);
+void refresh_priority(void);
 
 #endif /* threads/thread.h */

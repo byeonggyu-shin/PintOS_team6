@@ -50,6 +50,8 @@ sema_init (struct semaphore *sema, unsigned value) {
 	list_init (&sema->waiters);
 }
 
+
+
 /* Down or "P" operation on a semaphore.  Waits for SEMA's value
    to become positive and then atomically decrements it.
 
@@ -68,9 +70,8 @@ sema_down (struct semaphore *sema) {
 	old_level = intr_disable ();      /* 현재 인터럽트 레벨을 비활성화하고, 이전 인터럽트 레벨을 old_level에 저장 */
 	while (sema->value == 0) {        /* 세마포어 값이 0인 동안 실행 */
 
-		// list_push_back (&sema->waiters, &thread_current ()->elem);   /* 현재 스레드의 elem을 세마포어의 대기자 목록에 추가 */
-
-		list_insert_ordered(&sema->waiters, &thread_current()->elem, cmp_priority, 0);
+		list_push_back (&sema->waiters, &thread_current ()->elem);   /* 현재 스레드의 elem을 세마포어의 대기자 목록에 추가 */
+		// list_insert_ordered(&sema->waiters, &thread_current()->elem, cmp_priority, 0);
 		thread_block ();                /* 현재 스레드를 block, 다른 스레드가 실행 */
 	}
 	sema->value--;                    /* 세마포어의 값을 원자적으로 감소 */
@@ -113,13 +114,17 @@ sema_up (struct semaphore *sema) {
 
 	ASSERT (sema != NULL);               /* 세마포어 포인터가 널(NULL)이 아님을 확인 */
 
+
 	old_level = intr_disable ();         /* 현재 인터럽트 레벨을 비활성화하고, 이전 인터럽트 레벨을 old_level에 저장 */
 	if (!list_empty (&sema->waiters))    /* 세마포어의 대기자 목록이 비어있지 않은 경우에만 실행 */
 		{  /* 대기자 목록에서 가장 앞에 있는 스레드를 꺼내어 차단 해제(unblock)하고 실행을 재개 */
 			list_sort(&sema->waiters, cmp_priority, 0);
+			ASSERT (!list_empty(&sema->waiters));     /* ?  */
 			thread_unblock (list_entry (list_pop_front (&sema->waiters), struct thread, elem));
 		}
 	sema->value++;                       /* 세마포어의 값을 증가 */
+
+	test_max_priority();
 	intr_set_level (old_level);          /* 이전 인터럽트 레벨을 복원 */
 }
 
@@ -173,6 +178,7 @@ sema_test_helper (void *sema_) {
    acquire and release it.  When these restrictions prove
    onerous, it's a good sign that a semaphore should be used,
    instead of a lock. */
+/* 세마포어 초기화 , 0이면 사용중 1이면 사용가능*/
 void
 lock_init (struct lock *lock) {
 	ASSERT (lock != NULL);
@@ -194,9 +200,19 @@ lock_acquire (struct lock *lock) {
 	ASSERT (lock != NULL);
 	ASSERT (!intr_context ());
 	ASSERT (!lock_held_by_current_thread (lock));
+	
+	struct thread *cur = thread_current();
+	/* 만약 해당 lock을 누가 사용하고 있다면 */
+	if (lock->holder) {
+		cur->lock_to_wait_on = lock;    /* 현재 스레드의 wait_on_lock에 해당 lock을 저장 */
+		/* 지금 lock을 소유하고 있는 스레드의 donations에 현재 스레드를 저장 */
+		list_push_back(&lock->holder->donators_list, &cur->d_elem);
+		donate_priority();
+	}
 
 	sema_down (&lock->semaphore);
-	lock->holder = thread_current ();
+	cur->lock_to_wait_on = NULL;      /* lock을 획득했으므로 대기하고 있는 lock이 이제는 없음 */
+	lock->holder = cur;
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -233,7 +249,13 @@ lock_release (struct lock *lock) {
 	ASSERT (lock != NULL);
 	ASSERT (lock_held_by_current_thread (lock));
 
+	/* donations 리스트에서 해당 lock을 필요로 하는 스레드를 삭제 */
+	remove_with_lock(lock);
+	/* 현재 스레드의 priority를 업데이트 */
+	refresh_priority();
+
 	lock->holder = NULL;
+	/* 해당 lock에서 기다리고 있는 스레드 하나 동작 */
 	sema_up (&lock->semaphore);
 }
 
@@ -246,12 +268,6 @@ lock_held_by_current_thread (const struct lock *lock) {
 
 	return lock->holder == thread_current ();
 }
-
-/* One semaphore in a list. */
-struct semaphore_elem {
-	struct list_elem elem;              /* List element. */
-	struct semaphore semaphore;         /* This semaphore. */
-};
 
 /* Initializes condition variable COND.  A condition variable
    allows one piece of code to signal a condition and cooperating
@@ -292,10 +308,13 @@ cond_wait (struct condition *cond, struct lock *lock) {
 	ASSERT (lock != NULL);
 	ASSERT (!intr_context ());
 	ASSERT (lock_held_by_current_thread (lock));
-	sema_init (&waiter.semaphore, 0);      /* waiter를 cond의 waiters 리스트에 추가 */
 
-	// list_push_back (&cond->waiters, &waiter.elem);
-	list_insert_ordered (&cond->waiters, &waiter.elem, cmp_sema_priority,0);
+	sema_init (&waiter.semaphore, 0);      /* waiter를 cond의 waiters 리스트에 추가 */
+	
+	list_push_back (&cond->waiters, &waiter.elem);
+	// sema_down 전에는 waiter.semaphore.waiters에 thread의 list_elem이 연결이 안 됨
+	// list_insert_ordered (&cond->waiters, &waiter.elem, cmp_sema_priority,0);
+
 	lock_release (lock);
 	sema_down (&waiter.semaphore);
 	lock_acquire (lock);
@@ -317,7 +336,7 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED) {
 	ASSERT (lock_held_by_current_thread (lock));
 
 	if (!list_empty (&cond->waiters))
-		list_sort(&cond->waiters, cmp_sema_priority, 0 );
+		list_sort(&cond->waiters, cmp_sema_priority, 0);
 		sema_up (&list_entry (list_pop_front (&cond->waiters),struct semaphore_elem, elem)->semaphore);
 }
 
@@ -340,16 +359,80 @@ cond_broadcast (struct condition *cond, struct lock *lock) {
  * semaphore_elem으로부터 각 semaphore_elem의 쓰레드 디스크립터를 획득
  * 첫 번째 인자의 우선순위가 두 번째 인자의 우선순위보다 높으면 1을 반환 낮으면 0을 반환
 */
-bool cmp_sema_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED){
-  /* a와 b 세마포어 요소에서 각각 스레드 구조체 포인터를 획득 */
-  struct thread *thread_a = list_entry(a, struct semaphore_elem, elem)->semaphore.waiters.head.next;
-  struct thread *thread_b = list_entry(b, struct semaphore_elem, elem)->semaphore.waiters.head.next;
+bool cmp_sema_priority (const struct list_elem *a, const struct list_elem *b, void *aux)
+{
+	struct semaphore_elem *sa = list_entry(a, struct semaphore_elem, elem);
+	struct semaphore_elem *sb = list_entry(b, struct semaphore_elem, elem);
+	
+	// sema_down에서 semaphore.waiters에 thread의 list_elem이 들어갔기 때문에 아래 두 줄 가능.
+	struct list_elem *sa_e = list_begin(&(sa->semaphore.waiters));
+	struct list_elem *sb_e = list_begin(&(sb->semaphore.waiters));
+ 
+	struct thread *sa_t = list_entry(sa_e, struct thread, elem);
+	struct thread *sb_t = list_entry(sb_e, struct thread, elem);
 
-  /* 스레드 디스크립터에서 각 스레드의 우선순위를 할당 */ 
-  int priority_a = thread_a->priority;
-  int priority_b = thread_b->priority;
-
-  /* 첫 번째 인자의 우선순위가 두 번째 인자의 우선순위보다 높으면 1을 반환하고, 그렇지 않으면 0을 반환 */ 
-  return priority_a > priority_b;
+	return (sa_t->priority) > (sb_t->priority);
 }
 
+
+void donate_priority(void)
+{
+	int depth;
+	struct thread *t = thread_current();
+	struct thread *holder;
+
+	/* 최대 depth 8로 설정 */
+	for (depth = 0; depth < 8; depth++) {
+		/* 더 이상 nested가 없으면 탈출*/
+		if (!t->lock_to_wait_on) break; 
+
+		holder = t->lock_to_wait_on->holder;
+		holder->priority = t->priority;    /* 우선 순위를 donation */ 
+		t = holder;                        /* 다음 depth 시작 */
+	}
+}
+
+/* LOCK을 release함과 동시에 해당 LOCK을 얻기 위해 priority를 기부했던
+   donator threads들을 LOCK을 release하는 thread의 donators list에서 제거
+ */
+void remove_with_lock(struct lock *lock)
+{
+	struct thread *cur = thread_current();
+	struct list_elem *e;
+	struct thread *t;
+
+	for (e = list_begin(&cur->donators_list); e != list_end(&cur->donators_list);) {
+		t = list_entry(e, struct thread, d_elem);
+		e = list_next(e);
+		if (t->lock_to_wait_on == lock) {
+			list_remove(&t->d_elem);
+		}
+	}
+}
+
+/**
+ * 해당 스레드가 donation을 받고 있다면, 초기 우선 순위보다 더 큰 값으로 우선 순위가 갱신
+*/
+void refresh_priority(void)
+{
+	struct thread *cur = thread_current();
+	cur->priority = cur->original_priority;     /* 미리 저장해둔 진짜 우선순위*/ 
+
+	/* donation을 받고 있다면 */
+	if (!list_empty(&cur->donators_list)) {
+		list_sort(&cur->donators_list, cmp_donator_priority, NULL);
+
+		struct thread *top_pri_donator = list_entry(list_front(&cur->donators_list), struct thread, d_elem);
+		if (top_pri_donator->priority > cur->priority) {      /* 만약 초기 우선 순위보다 더 큰 값 */
+			cur->priority = top_pri_donator->priority;
+		}
+	}
+}
+
+bool cmp_donator_priority (const struct list_elem *new, const struct list_elem *existing, void *aux)
+{
+	struct thread *new_donator = list_entry(new, struct thread, d_elem);
+	struct thread *existing_donator = list_entry(existing, struct thread, d_elem);
+
+	return new_donator->priority > existing_donator->priority ? 1 : 0;
+}
