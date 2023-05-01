@@ -22,10 +22,13 @@
 #include "vm/vm.h"
 #endif
 
+#define SAU 8 // Stack Pointer Alignment Unit = 8
+
 static void process_cleanup (void);
 static bool load (const char *file_name, struct intr_frame *if_);
 static void initd (void *f_name);
 static void __do_fork (void *);
+void argument_stack (char **argv, int argc, struct intr_frame *if_);
 
 /* General process initializer for initd and other process. */
 static void
@@ -161,10 +164,14 @@ error:
 /* Switch the current execution context to the f_name.
  * Returns -1 on fail. */
 int
-process_exec (void *f_name) {
-	char *file_name = f_name;
+process_exec (void *f_name) {// 프로그램을 메모리에 적재하고 실행
+	char *file_name = f_name; // 문자열로 인식하기 위해 char *로 변환
 	bool success;
 
+	/* 원본 file name을 copy 해오기 */
+	char file_name_copy[128]; // 스택에 저장
+	memcpy(file_name_copy, file_name, strlen(file_name) + 1); // strlen + 1 해 '\n' 까지 들고온다
+	
 	/* We cannot use the intr_frame in the thread structure.
 	 * This is because when current thread rescheduled,
 	 * it stores the execution information to the member. */
@@ -176,15 +183,25 @@ process_exec (void *f_name) {
 	/* We first kill the current context */
 	process_cleanup ();
 
-	/* And then load the binary */
-	success = load (file_name, &_if);
+	/* load the binary */
+	success = load (file_name_copy, &_if); // file_name, _if를 현재 프로세스에 load
 
-	/* If load failed, quit. */
+	// /* If load failed, quit. */
 	palloc_free_page (file_name);
-	if (!success)
+	if (!success) {
 		return -1;
+	}
+	/* hex_dump 는 매개변수를 pos, buffer, size, boolean으로 받는다.
+	   dumps the SIZE bytes in BUF to the console as hex bytes arranged
+	   16 per line. Numeric offsets are also included, starting at OFS
+	   for the first byte in BUF. If ASCII is true then the corresponding
+	   ASCII characters are also rendered alongside */
 
-	/* Start switched process. */
+	hex_dump (_if.rsp, _if.rsp, USER_STACK - _if.rsp, true);
+
+	/* KERN_BASE, USER_STACK 어떤걸 기준으로 hex_dump 할 것인지에 따라
+	   page_fault 오류 발생시킨다 */
+	// /* Start switched process. */
 	do_iret (&_if);
 	NOT_REACHED ();
 }
@@ -204,6 +221,10 @@ process_wait (tid_t child_tid UNUSED) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
+	/* 유저 프로세스를 생성한 후 프로세스 종료 무한대기 */
+	while (true) {
+		// 무한루프
+	}
 	return -1;
 }
 
@@ -315,6 +336,51 @@ static bool validate_segment (const struct Phdr *, struct file *);
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
 		uint32_t read_bytes, uint32_t zero_bytes,
 		bool writable);
+/*
+ * argument_stack - 인자를 스택에 올린다
+ */
+void argument_stack (char **argv, int argc, struct intr_frame *if_)
+{
+	char *arg_address[128];
+	// 거꾸로 삽입
+
+	/* 맨 끝 NULL 값 (arg[4]) 제외하고 스택에 저장 */
+	for (int i = argc-1; i >= 0; i--) {
+		int argv_len = strlen(argv[i]) + 1;
+		/* if_ -> rsp: 현재 user stack에서 현재 위치를 가리키는 스택 포인터
+		   각 인자에서 인자 크기(argv_len)를 읽고
+		   (이 때 각 인자에 sentinel이 포함되어 있으니 +1 - strlen에서는 sentinel 빼고 읽음)
+		   그 크기만큼 rsp를 내려준다. 그 다음 빈 공간만큼 memcpy */
+		if_->rsp = if_->rsp - (argv_len); // 받아온 길이 만큼 스택 크기 늘려줌
+		memcpy (if_->rsp, argv[i], argv_len); // 늘려준 스택 공간에 해당 인자 복사
+		arg_address[i] = if_->rsp; // arg_address에 인자 복사한 시작 주소값 저장
+	}
+
+	/* word_align : 8의 배수 맞추기 위해 padding 삽입 */
+	while (if_->rsp % SAU != 0) {
+		if_->rsp--;
+		memset(if_->rsp, 0, sizeof(uint8_t));
+	}
+
+	/* word_align 이후 argv[4]~argv[0]의 주소 넣어준다 */
+	for (int i = argc; i >= 0; i--) {
+		if_->rsp = if_->rsp - SAU; // 8바이트만큼 내리고
+		if (i == argc) { // 가장 위에는 0 넣음
+			memset (if_->rsp, 0, sizeof(char **));
+		}
+		else { // 나머지에는 arg_address 안에 들어있는 값 가져오기
+			memcpy (if_->rsp, &arg_address[i], sizeof(char **)); // 8bytes
+		}
+	}
+
+	/* Fake return address */
+	if_->rsp -= sizeof(void *);
+	memset (if_->rsp, 0, sizeof(void *));
+
+	/* Set rdi, rsi (rdi : 문자열 목적지 주소, rsi : 문자열 출발지 주소)*/
+	if_->R.rdi = argc;
+	if_->R.rsi = if_->rsp + SAU;
+}
 
 /* Loads an ELF executable from FILE_NAME into the current thread.
  * Stores the executable's entry point into *RIP
@@ -328,6 +394,20 @@ load (const char *file_name, struct intr_frame *if_) {
 	off_t file_ofs;
 	bool success = false;
 	int i;
+
+	/* strtok_r 함수 이용해 공백 기준으로 명령어 파싱 구현 */
+	char *arg_list[128];
+	char *token, *save_ptr;
+	int token_count = 0;
+
+	token = strtok_r(file_name, " ", &save_ptr);
+	arg_list[token_count] = token;
+
+	while (token != NULL) {
+		token = strtok_r (NULL, " ", &save_ptr);
+		token_count++;
+		arg_list[token_count] = token;
+	}
 
 	/* Allocate and activate page directory. */
 	t->pml4 = pml4_create ();
@@ -416,6 +496,7 @@ load (const char *file_name, struct intr_frame *if_) {
 
 	/* TODO: Your code goes here.
 	 * TODO: Implement argument passing (see project2/argument_passing.html). */
+	argument_stack (arg_list, token_count, if_);
 
 	success = true;
 

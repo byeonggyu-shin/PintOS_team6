@@ -28,6 +28,14 @@
    that are ready to run but not actually running. */
 static struct list ready_list;
 
+/* List of processes in BLOCKED state, that is, processes
+   that must be awoken in order to go into ready_list */
+static struct list sleep_list;
+
+/* Minimum out of all wakeup_tick values of threads waiting
+   in sleep_list */
+static int64_t next_tick_to_awake;
+
 /* Idle thread. */
 static struct thread *idle_thread;
 
@@ -47,7 +55,7 @@ static long long user_ticks;    /* # of timer ticks in user programs. */
 
 /* Scheduling. */
 #define TIME_SLICE 4            /* # of timer ticks to give each thread. */
-static unsigned thread_ticks;   /* # of timer ticks since last yield. */
+static long long thread_ticks;   /* # of timer ticks since last yield. */
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
@@ -72,7 +80,6 @@ static tid_t allocate_tid (void);
  * always at the beginning of a page and the stack pointer is
  * somewhere in the middle, this locates the curent thread. */
 #define running_thread() ((struct thread *) (pg_round_down (rrsp ())))
-bool is_prior (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
 
 // Global descriptor table for the thread_start.
 // Because the gdt will be setup after the thread_init, we should
@@ -109,7 +116,8 @@ thread_init (void) {
 	lock_init (&tid_lock);
 	list_init (&ready_list);
 	list_init (&destruction_req);
-
+	list_init (&sleep_list);
+	next_tick_to_awake = INT64_MAX;
 	/* Set up a thread structure for the running thread. */
 	initial_thread = running_thread ();
 	init_thread (initial_thread, "main", PRI_DEFAULT);
@@ -207,6 +215,7 @@ thread_create (const char *name, int priority,
 	/* Add to run queue. */
 	thread_unblock (t);
 
+	test_max_priority();
 	return tid;
 }
 
@@ -240,8 +249,7 @@ thread_unblock (struct thread *t) {
 
 	old_level = intr_disable ();
 	ASSERT (t->status == THREAD_BLOCKED);
-	/*list_push_back (&ready_list, &t->elem); */
-	list_insert_ordered (&ready_list, &t->elem, (list_less_func *) &is_prior, NULL);
+	list_insert_ordered (&ready_list, &t->elem, cmp_priority, NULL);
 	t->status = THREAD_READY;
 	intr_set_level (old_level);
 }
@@ -304,33 +312,24 @@ thread_yield (void) {
 
 	old_level = intr_disable ();
 	if (curr != idle_thread)
-		list_push_back (&ready_list, &curr->elem);
-	do_schedule (THREAD_READY);
+		list_insert_ordered (&ready_list, &curr->elem, cmp_priority, NULL);
+	do_schedule (THREAD_READY); // 컨텍스트 스위치 수행
 	intr_set_level (old_level);
 }
 
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
 thread_set_priority (int new_priority) {
-	thread_current ()->priority = new_priority;
+	thread_current ()->init_priority = new_priority;
+	
+	refresh_priority();
+	test_max_priority();	
 }
 
 /* Returns the current thread's priority. */
 int
 thread_get_priority (void) {
 	return thread_current ()->priority;
-}
-/* a, b(thread->list_elems) 우선순위 비교 후 a가 우선순위가 높다면 True else False */
-bool
-is_prior (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
-{// list_entry : offsetof(TYPE,MEMBER)로 elem이 얼마나 떨어져있는지 구함
- // 			 그러면 a가 가르키는 리스트 요소의 next 포인터에서 위에서 구한 값을 빼서
- // 			 구조체 시작 주소를 얻음, uint8_t 포인터 산술로 포인터 간 거리를
- //				 바이트 단위로 계산 해 struct thread*로 캐스팅 해서 반환
-  struct thread *t_a = list_entry (a, struct thread, elem);
-  struct thread *t_b = list_entry (b, struct thread, elem);
-  if (t_a->priority > t_b->priority) return true;
-  return false;
 }
 
 /* Sets the current thread's nice value to NICE. */
@@ -422,6 +421,9 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->tf.rsp = (uint64_t) t + PGSIZE - sizeof (void *);
 	t->priority = priority;
 	t->magic = THREAD_MAGIC;
+	t->init_priority = priority;
+	list_init(&t->donors_list);
+	t->waiting_for_this_lock = NULL;
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
@@ -575,7 +577,7 @@ schedule (void) {
 		   thread. This must happen late so that thread_exit() doesn't
 		   pull out the rug under itself.
 		   We just queuing the page free reqeust here because the page is
-		   currently used by the stack.
+		   currently used bye the stack.
 		   The real destruction logic will be called at the beginning of the
 		   schedule(). */
 		if (curr && curr->status == THREAD_DYING && curr != initial_thread) {
@@ -600,4 +602,82 @@ allocate_tid (void) {
 	lock_release (&tid_lock);
 
 	return tid;
+}
+
+void
+thread_sleep(int64_t ticks)
+{
+	struct thread *curr = thread_current ();
+	enum intr_level old_level;
+
+	ASSERT (!intr_context ());
+
+	old_level = intr_disable ();
+	curr->wakeup_tick = ticks;
+	update_next_tick_to_awake(ticks);
+	if (curr != idle_thread)
+		list_push_back (&sleep_list, &curr->elem);
+	do_schedule (THREAD_BLOCKED);
+	intr_set_level (old_level);
+}
+
+void 
+thread_awake(int64_t ticks)
+{
+	struct thread *t;
+	struct list_elem *curr = list_begin(&sleep_list);
+	struct list_elem *next;
+	struct list_elem *tail = list_end(&sleep_list);
+	
+	while (curr != tail) {
+		t = list_entry(curr, struct thread, elem);
+		next = list_next(curr);
+		if (t->wakeup_tick <= ticks) {
+			list_remove(curr);
+			thread_unblock(t);
+		}
+		else {
+			update_next_tick_to_awake(t->wakeup_tick);
+		}
+		curr = next;
+	}
+}
+
+void
+update_next_tick_to_awake(int64_t ticks)
+{
+	if (ticks < next_tick_to_awake) {
+		next_tick_to_awake = ticks;
+	}
+}
+
+int64_t
+get_next_tick_to_awake(void)
+{
+	return next_tick_to_awake;
+}
+
+void
+test_max_priority(void)
+{
+	struct thread *curr_running = running_thread();
+	struct thread *top_thread;
+
+	if (list_empty(&ready_list))
+		return;
+	
+	top_thread = list_entry(list_begin(&ready_list), struct thread, elem);
+
+	if (curr_running->priority < top_thread->priority)
+		thread_yield();
+}
+
+/* list_insert_ordered 함수에 넣어줄 콜백 함수, '내림차순' 정렬 */
+bool
+cmp_priority (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+{
+	struct thread *thread_a = list_entry(a, struct thread, elem);
+	struct thread *thread_b = list_entry(b, struct thread, elem);
+
+	return thread_a->priority > thread_b->priority;
 }
