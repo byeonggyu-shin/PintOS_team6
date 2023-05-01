@@ -28,6 +28,7 @@ static void initd (void *f_name);
 static void __do_fork (void *);
 
 /* General process initializer for initd and other process. */
+/*  initd 및 기타 프로세스에 대한 일반 프로세스 이니셜라이저 */
 static void
 process_init (void) {
 	struct thread *current = thread_current ();
@@ -38,41 +39,52 @@ process_init (void) {
  * before process_create_initd() returns. Returns the initd's
  * thread id, or TID_ERROR if the thread cannot be created.
  * Notice that THIS SHOULD BE CALLED ONCE. */
+/*  file_name이 주어지면 초기 사용자 프로세스를 위한 새 스레드를 생성하는 역할 */
 tid_t
 process_create_initd (const char *file_name) {
-	char *fn_copy;
-	tid_t tid;
+	char *fn_copy;         /* file_name의 복사본을 저장 */
+	tid_t tid;             /* tid 변수를 선언하며 새로 생성된 스레드의 스레드 ID를 저장 */
 
 	/* Make a copy of FILE_NAME.
 	 * Otherwise there's a race between the caller and load(). */
 	fn_copy = palloc_get_page (0);
 	if (fn_copy == NULL)
 		return TID_ERROR;
+	/* file_name의 내용을 fn_copy에서 할당된 메모리로 복사하여 PGSIZE를 초과하지 않도록 함*/
 	strlcpy (fn_copy, file_name, PGSIZE);
 
 	/* Create a new thread to execute FILE_NAME. */
+	/* file_name, 기본 우선 순위 PRI_DEFAULT 및 initd 함수를 스레드 함수로 사용하여 새 스레드를 생성 */
 	tid = thread_create (file_name, PRI_DEFAULT, initd, fn_copy);
-	if (tid == TID_ERROR)
-		palloc_free_page (fn_copy);
+	if (tid == TID_ERROR)              /* 스레드 생성이 실패하고 tid가 TID_ERROR와 같으면 */
+		palloc_free_page (fn_copy);      /* fn_copy에 할당된 메모리가 해제 */
+	/* 새로 생성된 스레드의 스레드 ID tid를 반환 */
 	return tid;
 }
 
 /* A thread function that launches first user process. */
+/* 첫 번째 사용자 프로세스를 시작하는 스레드 함수 */
 static void
 initd (void *f_name) {
-#ifdef VM
+#ifdef VM                  /* VM 옵션이 활성화된 경우 */
+	/* 현재 스레드의 추가 페이지 테이블을 초기화 */
 	supplemental_page_table_init (&thread_current ()->spt);
 #endif
 
-	process_init ();
+	process_init ();                    /* 데이터 구조와 리소스를 설정하여 프로세스를 초기화 */
 
-	if (process_exec (f_name) < 0)
+	if (process_exec (f_name) < 0)      /* f_name으로 사용자 프로세스를 실행하려고 시도 */
 		PANIC("Fail to launch initd\n");
+
+	/* 제어 흐름이 이 지점에 도달하지 않아야 함을 나타넴 
+	프로그램이 사용자 프로세스를 성공적으로 실행하거나 실패할 경우 패닉 상태여야 하기 때문 */
 	NOT_REACHED ();
 }
 
 /* Clones the current process as `name`. Returns the new process's thread id, or
  * TID_ERROR if the thread cannot be created. */
+/* 현재 프로세스를 name으로 복제
+ 스레드를 생성할 수 없는 경우 새 프로세스의 스레드 ID 또는 TID_ERROR를 반환 */
 tid_t
 process_fork (const char *name, struct intr_frame *if_ UNUSED) {
 	/* Clone current thread to new thread.*/
@@ -91,22 +103,30 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
 	void *newpage;
 	bool writable;
 
-	/* 1. TODO: If the parent_page is kernel page, then return immediately. */
+	/* 1. TODO: parent_page가 커널 페이지인 경우 즉시 반환 */
 
-	/* 2. Resolve VA from the parent's page map level 4. */
+	/* 2. TODO: 부모의 페이지 맵 레벨 4에서 VA 해결  */
 	parent_page = pml4_get_page (parent->pml4, va);
 
 	/* 3. TODO: Allocate new PAL_USER page for the child and set result to
 	 *    TODO: NEWPAGE. */
+	/* 3. TODO: 자식에게 새로운 PAL_USER 페이지를 할당하고 결과를 NEWPAGE로 설정 */
+
 
 	/* 4. TODO: Duplicate parent's page to the new page and
 	 *    TODO: check whether parent's page is writable or not (set WRITABLE
 	 *    TODO: according to the result). */
+	/* 4. TODO: 부모 페이지를 새 페이지로 복제하여 부모 페이지의 쓰기 가능 여부를 확인
+		(결과에 따라 쓰기 가능으로 설정) */
 
 	/* 5. Add new page to child's page table at address VA with WRITABLE
 	 *    permission. */
+	/* 5. TODO: 쓰기 가능한 권한으로 주소 VA의 하위 페이지 테이블에 새 페이지를 추가 */
+
 	if (!pml4_set_page (current->pml4, va, newpage, writable)) {
 		/* 6. TODO: if fail to insert page, do error handling. */
+		/* 6. TODO: 페이지 삽입에 실패한 경우 오류 처리를 수행합니다. */
+
 	}
 	return true;
 }
@@ -160,32 +180,40 @@ error:
 
 /* Switch the current execution context to the f_name.
  * Returns -1 on fail. */
+/* 현재 실행 컨텍스트를 지정된 file_name(f_name)으로 전환
+	프로세스 실행에 실패하면 -1을 반환*/
 int
 process_exec (void *f_name) {
-	char *file_name = f_name;
-	bool success;
-
+	char *file_name = f_name;        /* 입력 매개변수 f_name을 file_name이라는 문자 포인터로 캐스트 */
+	bool success;                    /* 새 프로세스를 로드한 결과를 저장 */
+ 
 	/* We cannot use the intr_frame in the thread structure.
 	 * This is because when current thread rescheduled,
 	 * it stores the execution information to the member. */
+	/* 스레드 구조에서 intr_frame을 사용할 수 없음
+	 현재 스레드가 스케줄링을 변경할 때 실행 정보를 구성원에게 저장하기 때문 */
 	struct intr_frame _if;
 	_if.ds = _if.es = _if.ss = SEL_UDSEG;
 	_if.cs = SEL_UCSEG;
 	_if.eflags = FLAG_IF | FLAG_MBS;
 
 	/* We first kill the current context */
+	/* 현재 프로세스와 관련된 리소스를 해제 */
 	process_cleanup ();
 
 	/* And then load the binary */
+	/* 새 프로세스의 바이너리를 메모리에 로드하고 초기 상태를 설정 */
 	success = load (file_name, &_if);
 
 	/* If load failed, quit. */
-	palloc_free_page (file_name);
-	if (!success)
-		return -1;
+	palloc_free_page (file_name);      /* file_name에 할당된 메모리를 해제 */
+	if (!success)                      /* 로드 작업이 실패하면 -1을 반환 */
+		return -1; 
 
 	/* Start switched process. */
-	do_iret (&_if);
+	/*  IRET(interrupt return) 작업을 수행하여 새 프로세스의 컨텍스트로 전환 */
+	do_iret (&_if);       
+	/* 이 지점에 절대 도달해서는 안 됨을 나타내는 매크로 */            
 	NOT_REACHED ();
 }
 
@@ -204,6 +232,7 @@ process_wait (tid_t child_tid UNUSED) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
+	while(1){};  // infinite loop 추가
 	return -1;
 }
 
@@ -248,12 +277,17 @@ process_cleanup (void) {
 
 /* Sets up the CPU for running user code in the nest thread.
  * This function is called on every context switch. */
+/* 다음 스레드에서 사용자 코드를 실행하기 위해 CPU를 설정
+	모든 컨텍스트 스위치에서 호출 */
 void
 process_activate (struct thread *next) {
 	/* Activate thread's page tables. */
-	pml4_activate (next->pml4);
+	/* 다음 스레드의 페이지 테이블을 활성화 */
+	pml4_activate (next->pml4);          /* CPU의 CR3 레지스터가 다음 스레드의 PML4(최상위 페이지 테이블)의 기본 주소로 설정 */
 
 	/* Set thread's kernel stack for use in processing interrupts. */
+	/* 다음 스레드의 커널 스택으로 TSS(Task State Segment)를 업데이트 
+	 ->다음 스레드에서 인터럽트를 처리할 때 올바른 커널 스택이 사용 */
 	tss_update (next);
 }
 
@@ -320,22 +354,25 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
  * Stores the executable's entry point into *RIP
  * and its initial stack pointer into *RSP.
  * Returns true if successful, false otherwise. */
+/* ELF(Executable and Linkable Format) 실행 파일을 현재 스레드의 주소 공간으로 로드하는 역할*/
 static bool
 load (const char *file_name, struct intr_frame *if_) {
-	struct thread *t = thread_current ();
-	struct ELF ehdr;
-	struct file *file = NULL;
-	off_t file_ofs;
-	bool success = false;
-	int i;
+	struct thread *t = thread_current ();        /* 현재 스레드 */
+	struct ELF ehdr;                             /* 헤더 정보를 저장할 ELF 헤더 구조 */
+	struct file *file = NULL;                    /* 열린 파일에 대한 참조를 보유할 파일 포인터 */
+	off_t file_ofs;                              /* 파일 위치를 추적하기 위해 파일 오프셋 변수 */
+	bool success = false;                        /* 성공 플래그를 false로 초기화 */
+	int i;                                       /* 루프 카운터 변수 */
 
 	/* Allocate and activate page directory. */
+	/* 현재 스레드에 대한 새 페이지 디렉토리를 할당하고 활성화 */
 	t->pml4 = pml4_create ();
 	if (t->pml4 == NULL)
 		goto done;
 	process_activate (thread_current ());
 
 	/* Open executable file. */
+	/* 실행 파일을 열고 파일을 열 수 없는 경우 오류를 처리 */
 	file = filesys_open (file_name);
 	if (file == NULL) {
 		printf ("load: %s: open failed\n", file_name);
@@ -343,6 +380,8 @@ load (const char *file_name, struct intr_frame *if_) {
 	}
 
 	/* Read and verify executable header. */
+	/*  ELF 헤더를 읽고 확인 
+		헤더가 잘못된 경우 오류 메시지를 인쇄하고 "done" 레이블로 이동 */
 	if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
 			|| memcmp (ehdr.e_ident, "\177ELF\2\1\1", 7)
 			|| ehdr.e_type != 2
@@ -355,10 +394,11 @@ load (const char *file_name, struct intr_frame *if_) {
 	}
 
 	/* Read program headers. */
+	/* 파일 오프셋을 프로그램 헤더의 시작 부분으로 초기화 */
 	file_ofs = ehdr.e_phoff;
-	for (i = 0; i < ehdr.e_phnum; i++) {
-		struct Phdr phdr;
-
+	for (i = 0; i < ehdr.e_phnum; i++) {                       /* 모든 프로그램 헤더를 읽는 루프를 시작 */
+		struct Phdr phdr;             
+		/* 읽을 수 없는 경우 오류를 처리 */
 		if (file_ofs < 0 || file_ofs > file_length (file))
 			goto done;
 		file_seek (file, file_ofs);
@@ -366,7 +406,7 @@ load (const char *file_name, struct intr_frame *if_) {
 		if (file_read (file, &phdr, sizeof phdr) != sizeof phdr)
 			goto done;
 		file_ofs += sizeof phdr;
-		switch (phdr.p_type) {
+		switch (phdr.p_type) {               /* type에 따라 헤더를 처리*/
 			case PT_NULL:
 			case PT_NOTE:
 			case PT_PHDR:
@@ -408,6 +448,7 @@ load (const char *file_name, struct intr_frame *if_) {
 	}
 
 	/* Set up stack. */
+	/* setup_stack을 호출하여 프로세스의 초기 스택을 설정 */
 	if (!setup_stack (if_))
 		goto done;
 
@@ -535,19 +576,25 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 }
 
 /* Create a minimal stack by mapping a zeroed page at the USER_STACK */
+/* USER_STACK에서 제로 페이지를 매핑하여 최소 스택 생성 */
 static bool
 setup_stack (struct intr_frame *if_) {
-	uint8_t *kpage;
-	bool success = false;
+	uint8_t *kpage;                      /* 커널 페이지를 나타내는 부호 없는 8비트 정수에 대한 포인터를 선언 */
+	bool success = false;                /* 스택 설정이 성공했는지 여부를 나타내는 데 사용 */
 
+	/* PAL_USER 및 PAL_ZERO 플래그로 사용자 스택에 새 페이지를 할당
+		PAL_USER는 페이지가 사용자 모드용임을 지정하고 PAL_ZERO는 할당된 페이지가 0이 되어야 함 */
 	kpage = palloc_get_page (PAL_USER | PAL_ZERO);
-	if (kpage != NULL) {
+	if (kpage != NULL) {                 /* 할당된 커널 페이지(kpage)가 NULL(할당 성공)이 아닌지 확인 */
+		/* install_page 함수를 호출하여 할당된 커널 페이지(kpage)를 페이지 크기를 뺀 사용자 스택 주소에 매핑 */
 		success = install_page (((uint8_t *) USER_STACK) - PGSIZE, kpage, true);
-		if (success)
+		if (success)							      	 /* install_page 함수 호출이 성공했는지 확인*/
+			/* 성공하면 인터럽트 프레임(if_)의 초기 스택 포인터를 USER_STACK으로 설정 */
 			if_->rsp = USER_STACK;
 		else
-			palloc_free_page (kpage);
-	}
+			palloc_free_page (kpage);        /* 할당된 커널 페이지(kpage)를 해제 */
+	} 
+	/* 스택 설정이 성공했는지 여부를 나타내는 success 변수를 반환 */
 	return success;
 }
 
