@@ -5,6 +5,9 @@
 #include <list.h>
 #include <stdint.h>
 #include "threads/interrupt.h"
+
+#include "threads/synch.h"
+
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -27,6 +30,14 @@ typedef int tid_t;
 #define PRI_MIN 0                       /* Lowest priority. */
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
+
+/* USERPROG 매크로 */
+#define USERPROG
+/* pages to allocate for file descriptor tables (thread_create, process_exit) */
+#define FDT_PAGES 3		
+/* limit fd_idx */
+#define FDCOUNT_LIMIT FDT_PAGES *(1 << 9)		
+
 
 /* A kernel thread or user process.
  *
@@ -106,6 +117,18 @@ struct thread {
 	/* priority를 donate한 스레드들의 리스트를 관리하기 위한 element
 		우선 순위를 donate한 스레드의 donations 리스트에 연결*/
 	struct list_elem d_elem; 
+
+	int exit_status;	 	/* to give child exit_status to parent */
+	int fd_idx;                     /* for open file's fd in fd_table */
+	struct intr_frame parent_if;	/* Information of parent's frame */
+	struct list child_list; /* list of threads that are made by this thread */
+	struct list_elem child_elem; /* elem for this thread's parent's child_list */
+	struct semaphore fork_sema; /* parent thread should wait while child thread copy parent */
+	struct semaphore wait_sema;
+	struct semaphore free_sema;
+	struct file **fd_table;   /* allocated in thread_create */	
+	struct file *running;
+
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
 	uint64_t *pml4;                     /* Page map level 4 */

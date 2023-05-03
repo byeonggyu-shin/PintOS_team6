@@ -27,6 +27,8 @@ static bool load (const char *file_name, struct intr_frame *if_);
 static void initd (void *f_name);
 static void __do_fork (void *);
 
+struct thread *get_child_process (int pid);
+
 void argument_stack(char **argv, int argc, struct intr_frame *_if);
 /* General process initializer for initd and other process. */
 /*  initd 및 기타 프로세스에 대한 일반 프로세스 이니셜라이저 */
@@ -188,6 +190,7 @@ process_exec (void *f_name) {
 	char *file_name = f_name;        /* 입력 매개변수 f_name을 file_name이라는 문자 포인터로 캐스트 */
 	bool success;                    /* 새 프로세스를 로드한 결과를 저장 */
  
+
 	/* We cannot use the intr_frame in the thread structure.
 	 * This is because when current thread rescheduled,
 	 * it stores the execution information to the member. */
@@ -202,6 +205,7 @@ process_exec (void *f_name) {
 	/* 현재 프로세스와 관련된 리소스를 해제 */
 	process_cleanup ();
 
+
 	/* parsing을 위한 변수 선언*/
 	char *argv[128];           
 	int argc = 0;
@@ -215,6 +219,8 @@ process_exec (void *f_name) {
 	/* And then load the binary */
 	/* 새 프로세스의 바이너리를 메모리에 로드하고 초기 상태를 설정 */
 	success = load (file_name, &_if);
+
+	// hex_dump(_if.rsp, _if.rsp, USER_STACK - _if.rsp, true);
 
 	/* If load failed, quit. */
 	if (!success){                      /* 로드 작업이 실패하면 -1을 반환 */
@@ -253,8 +259,19 @@ process_wait (tid_t child_tid UNUSED) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
-	while(1){};  /* infinite loop 추가 */
-	return -1;
+
+	struct thread *curr = thread_current();
+	struct thread *child = get_child_by_tid(child_tid);
+
+	if (child == NULL) {
+		return -1;
+	}
+	
+	sema_down(&child->wait_sema);
+	int exit_status = child->exit_status;
+	list_remove(&child->child_elem);
+	sema_up(&child->free_sema);
+	return exit_status;
 }
 
 /* Exit the process. This function is called by thread_exit (). */
@@ -387,6 +404,7 @@ load (const char *file_name, struct intr_frame *if_) {
 
 	char *token, *save_ptr;
 	char *argv[64];  
+
 	/* file_name 자체를 parsing하기보단, 안전하게 복사본을 새로 만들자 */
 	char* file_name_copy[48];
 	memcpy(file_name_copy, file_name, strlen(file_name)+1);  /* strlen은 \0을 빼고 세 주므로(\n?). */
@@ -492,6 +510,8 @@ load (const char *file_name, struct intr_frame *if_) {
 
 	/* TODO: Your code goes here.
 	 * TODO: Implement argument passing (see project2/argument_passing.html). */
+
+	argument_stack(if_, argc, argv);
 
 	success = true;
 
@@ -754,46 +774,9 @@ argument_stack(char **argv, int argc, struct intr_frame *_if){
 	memset(_if -> rsp, 0, PTR_SIZE);
 }
 
-
-// void argument_stack (char **argv, int argc, struct intr_frame *if_)
-// {
-// 	char *arg_address[128];
-// 	// 거꾸로 삽입
-
-// 	/* 맨 끝 NULL 값 (arg[4]) 제외하고 스택에 저장 */
-// 	for (int i = argc-1; i >= 0; i--) {
-// 		int argv_len = strlen(argv[i]) + 1;
-// 		/* if_ -> rsp: 현재 user stack에서 현재 위치를 가리키는 스택 포인터
-// 		   각 인자에서 인자 크기(argv_len)를 읽고
-// 		   (이 때 각 인자에 sentinel이 포함되어 있으니 +1 - strlen에서는 sentinel 빼고 읽음)
-// 		   그 크기만큼 rsp를 내려준다. 그 다음 빈 공간만큼 memcpy */
-// 		if_->rsp = if_->rsp - (argv_len); // 받아온 길이 만큼 스택 크기 늘려줌
-// 		memcpy (if_->rsp, argv[i], argv_len); // 늘려준 스택 공간에 해당 인자 복사
-// 		arg_address[i] = if_->rsp; // arg_address에 인자 복사한 시작 주소값 저장
-// 	}
-
-// 	/* word_align : 8의 배수 맞추기 위해 padding 삽입 */
-// 	while (if_->rsp % SAU != 0) {
-// 		if_->rsp--;
-// 		memset(if_->rsp, 0, sizeof(uint8_t));
-// 	}
-
-// 	/* word_align 이후 argv[4]~argv[0]의 주소 넣어준다 */
-// 	for (int i = argc; i >= 0; i--) {
-// 		if_->rsp = if_->rsp - SAU; // 8바이트만큼 내리고
-// 		if (i == argc) { // 가장 위에는 0 넣음
-// 			memset (if_->rsp, 0, sizeof(char **));
-// 		}
-// 		else { // 나머지에는 arg_address 안에 들어있는 값 가져오기
-// 			memcpy (if_->rsp, &arg_address[i], sizeof(char **)); // 8bytes
-// 		}
-// 	}
-
-// 	/* Fake return address */
-// 	if_->rsp -= sizeof(void *);
-// 	memset (if_->rsp, 0, sizeof(void *));
-
-// 	/* Set rdi, rsi (rdi : 문자열 목적지 주소, rsi : 문자열 출발지 주소)*/
-// 	if_->R.rdi = argc;
-// 	if_->R.rsi = if_->rsp + SAU;
-// }
+struct thread *get_child_process (int pid)
+{
+/* 자식 리스트에 접근하여 프로세스 디스크립터 검색 */
+/* 해당 pid가 존재하면 프로세스 디스크립터 반환 */
+/* 리스트에 존재하지 않으면 NULL 리턴 */
+}

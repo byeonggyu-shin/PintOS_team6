@@ -345,6 +345,7 @@ thread_tid (void) {
 
 /* Deschedules the current thread and destroys it.  Never
    returns to the caller. */
+/* 현재 스레드의 일정을 취소하고 삭제합니다. 호출자에게 돌아가지 않습니다. */
 void
 thread_exit (void) {
 	ASSERT (!intr_context ());
@@ -775,4 +776,15 @@ void test_max_priority(void) {
 	if (current_thread->priority < highest_priority_thread->priority)
 		/* 현재 스레드의 우선순위가 더 낮은 경우, 스케줄링 */ 
 		thread_yield();
+}
+
+struct thread* get_child_by_tid(tid_t tid){
+	struct thread *curr = thread_current();
+	struct thread *child;
+	struct list_elem *e;
+	for(e = list_begin(&curr->child_list); list_end(&curr->child_list); e = list_next(e)){
+		child = list_entry(e, struct thread, child_elem);
+		if (child->tid == tid)break;
+	}
+	return child;
 }
