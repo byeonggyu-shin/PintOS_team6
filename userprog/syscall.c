@@ -117,7 +117,6 @@ void syscall_handler (struct intr_frame *f UNUSED) {
             f -> R.rax = write(f -> R.rdi, f -> R.rsi, f -> R.rdx);
             break;
         case SYS_SEEK: // Change position in a file.
-            /*seek(f -> R.rdi, f -> R.rdx); <<<<<<<<<<< 이새끼가 범인이에요*/
             seek(f -> R.rdi, f -> R.rsi);
             break;
         case SYS_TELL: // Report current position in a file.
@@ -285,9 +284,8 @@ int filesize(int fd){
 - 파일 디스크립터가 0일 경우 키보드에 입력을 버퍼에 저장 후, 버퍼의 저장한 크기를 리턴 (input_getc() 이용)
 - 파일 디스크립터가 0이 아닐 경우 파일의 데이터를 크기만큼 저장 후 읽은 바이트 수를 리턴*/
 int read(int fd, void *buffer, unsigned size){
-    printf(" syscall - read activated");
     check_address(buffer);
-    check_address(buffer+size-1);
+    // check_address(buffer+size-1);
     int read_count; // 글자수 카운트 용(for문 사용하기 위해)
 
     struct file *file_obj = find_file_by_fd(fd);
@@ -318,7 +316,6 @@ int read(int fd, void *buffer, unsigned size){
 }
 
 int write(int fd, void *buffer, unsigned size){
-    // printf(" syscall - write activated");
     check_address(buffer);
     int read_count;
     struct file *file_obj = find_file_by_fd(fd);
