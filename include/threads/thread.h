@@ -5,6 +5,7 @@
 #include <list.h>
 #include <stdint.h>
 #include "threads/interrupt.h"
+#include "threads/synch.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -27,7 +28,9 @@ typedef int tid_t;
 #define PRI_MIN 0                       /* Lowest priority. */
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
-
+/***************** Project 2 - Syscall */
+#define FDCOUNT_LIMIT FDT_PAGES *(1<<9)
+#define FDT_PAGES 3
 /* A kernel thread or user process.
  *
  * Each thread structure is stored in its own 4 kB page.  The
@@ -100,9 +103,25 @@ struct thread {
 
 	int init_priority;
 	struct lock *waiting_for_this_lock;
-	/* list of threads that have donated their priorities to this thread */
 	struct list donors_list;
 	struct list_elem d_elem;
+
+	/* Project 2 - User Prog */
+	int exit_status; // _exit(), wait()
+	struct file **fd_table; // file related
+	int fd_idx; // file related
+
+	struct intr_frame parent_if;
+	struct list child_list;
+	struct list_elem child_elem;
+	struct file *running;
+	
+	struct semaphore wait_sema;
+	struct semaphore fork_sema;
+	struct semaphore free_sema;
+
+	int stdin_count;
+	int stdout_count;
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */

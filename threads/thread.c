@@ -201,6 +201,15 @@ thread_create (const char *name, int priority,
 	init_thread (t, name, priority);
 	tid = t->tid = allocate_tid ();
 
+	/* 파일 디스크립터 초기화 */
+	t->fd_table = palloc_get_multiple (PAL_ZERO, FDT_PAGES);
+	if (t->fd_table == NULL) {
+		return TID_ERROR;
+	}
+	t->fd_table[0] = 1; // STDIN자리 : 1
+	t->fd_table[1] = 2; // STDOUT자리 : 2
+	t->fd_idx = 2; // 0은 STDIN, 1은 STDOUT
+
 	/* Call the kernel_thread if it scheduled.
 	 * Note) rdi is 1st argument, and rsi is 2nd argument. */
 	t->tf.rip = (uintptr_t) kernel_thread;
@@ -211,7 +220,9 @@ thread_create (const char *name, int priority,
 	t->tf.ss = SEL_KDSEG;
 	t->tf.cs = SEL_KCSEG;
 	t->tf.eflags = FLAG_IF;
-
+/************** Project 2-2 Syscall */
+	struct thread *parent = thread_current();
+	list_push_back(&parent->child_list, &t->child_elem);
 	/* Add to run queue. */
 	thread_unblock (t);
 
@@ -424,6 +435,13 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->init_priority = priority;
 	list_init(&t->donors_list);
 	t->waiting_for_this_lock = NULL;
+	/* Project 2 - Userprog */
+	list_init(&t->child_list);
+	sema_init(&t->wait_sema, 0);
+	sema_init(&t->fork_sema, 0);
+	sema_init(&t->free_sema, 0);
+	t->running = NULL;
+	t->exit_status = 0;
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
@@ -662,12 +680,13 @@ test_max_priority(void)
 {
 	struct thread *curr_running = running_thread();
 	struct thread *top_thread;
-
-	if (list_empty(&ready_list))
+	// main(init.c) -> thread_init -> allocate_tid -> lock_release
+	// -> sema_up ->test_max_priority
+	if (list_empty(&ready_list) || intr_context())
 		return;
 	
 	top_thread = list_entry(list_begin(&ready_list), struct thread, elem);
-
+	// 새로 들어온 프로세스 우선도가 지금 돌아가는 프로세스 보다 높으면
 	if (curr_running->priority < top_thread->priority)
 		thread_yield();
 }

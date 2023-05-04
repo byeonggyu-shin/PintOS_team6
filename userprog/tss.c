@@ -47,8 +47,12 @@
 
 /* Kernel TSS. */
 struct task_state *tss;
-
-/* Initializes the kernel TSS. */
+/* TSS는 선점형 (preemptive) 스케줄러가 Task switching을 실행할 때
+ * 기존에 실행중인 태스크의 상태를 보존하고 있다가, 이후에 다시 CPU를 선점하게
+ * 되었을 때 보존된 태스크의 상태를 복구 시키기 위한 영역. 사용자 프로세스에서
+ * 시스템 콜을 호출하면 인터럽트 핸들러로 들어가게 되는데, 이 때 커널의 스택포인터를 찾아
+ * 거기에 이제까지 사용자 프로세스에서 진행했던 작업을 저장해 둔다. 커널 스택을 찾는데 드는
+ * 오버헤드를 줄이기 위한 용도로 사용 */
 void
 tss_init (void) {
 	/* Our TSS is never used in a call gate or task gate, so only a
