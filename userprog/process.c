@@ -88,22 +88,26 @@ tid_t process_fork (const char *name, struct intr_frame *if_ UNUSED) {
 	/* Clone current thread to new thread.*/
     // ************** Project 2-2 : User Programs - System Call
     struct thread *curr = thread_current();
-    // memcpy(&curr->parent_if, if_, sizeof(struct intr_frame));
+	/* 현재 스레드는 시스템 콜로 인해 intr_frame 값을 바꾼 상태라 tf.rsp는 유저 stack
+	 * 커널 stack으로 변경되었다.
+	 * 유저 스택의 정보를 intr_frame 안에 넣어서 넘겨 줘야한다. 이를 위해 thread struct
+	 * 안에 struct intr frame parent_if를 만들고 이를 넘겨주어야 한다.
+	 * 자식 스레드를 만들기 전에 현재 스레드의 parent_if에 넘겨받은 if_를 memcpy 해 준다
+	 * -> 유저 스택의 정보를 물고 있을 수 있다. */
+	memcpy (&curr->parent_if, if_, sizeof(struct intr_frame));
     tid_t pid = thread_create(name, PRI_DEFAULT, __do_fork, curr);
 
-    if (pid == TID_ERROR){
-        return TID_ERROR;
-    }
+    if (pid == TID_ERROR)
+		return TID_ERROR;
 
     struct thread *child = get_child(pid);
 
-    sema_down(&child->fork_sema);
+    sema_down(&child->fork_sema); // 자식스레드 fork_sema가 up 될 때 까지 대기
 
     if (child->exit_status == -1)
         return TID_ERROR;
 
     return pid;
-    
 }
 
 #ifndef VM
@@ -193,17 +197,6 @@ static void __do_fork (void *aux) {
     if (parent->fd_idx >= FDCOUNT_LIMIT)
         goto error;
 
-    // current->fd_table[0] = parent->fd_table[0]; // stdin
-    // current->fd_table[1] = parent->fd_table[1]; // stdout
-
-    // for (int i = 2 ; i < FDCOUNT_LIMIT ;i++ ){
-    //     struct file *f = parent->fd_table[i];
-    //     if (f == NULL){
-    //         continue;
-    //     }
-    //     current->fd_table[i] = file_duplicate(f);
-    // }
-
 	for (int i = 0; i < FDCOUNT_LIMIT; i++) {
 		struct file *file = parent->fd_table[i];
 		if (file == NULL) continue;
@@ -251,17 +244,16 @@ int process_exec (void *f_name) {
 
     // ************** Project 2-1 : User Programs - Argument Passing
     // strtok_r 함수 이용, 공백 기준으로 명령어 parsing 구현
-    char *arg_list[128];
+    char *argv[128];
     char *token, *save_ptr;
-    int token_count = 0;
+    int argc = 0;
 
     token = strtok_r(file_name, " ", &save_ptr);
-    arg_list[token_count] = token;
 
-    while(token!=NULL){
+    while(token != NULL){
+        argv[argc] = token;
         token = strtok_r(NULL, " ", &save_ptr);
-        token_count++;
-        arg_list[token_count] = token;
+        argc++;
     }
 	/* And then load the binary */
 	success = load (file_name, &_if);
@@ -273,14 +265,12 @@ int process_exec (void *f_name) {
         palloc_free_page (file_name);
         return -1;
     }
-
     
     // ************** Project 2-1 : User Programs - Argument Passing
 
-    argument_stack(arg_list, token_count, &_if);
+    argument_stack(argv, argc, &_if);
 
-    // hex dump for Debugging
-    // !!! CAUTION !!! hex_dump 는 매개변수를 pos, buffer, size, boolean 로 받는다. Defined in stdio.c
+    // hex dump for Debugging @ stdio.c
     // Dumps the SIZE bytes in BUF to the console as hex bytes arranged 16 per line.
     // Numeric offsets are also included, starting at OFS for the first byte in BUF.
     // If ASCII is true then the corresponding ASCII characters are also rendered alongside.
@@ -321,13 +311,13 @@ int process_wait (tid_t child_tid UNUSED) {
     if (child == NULL){
         return -1;
     }
-    sema_down(&child->wait_sema);
+    sema_down(&child->wait_sema); // 자식 종료될 때 까지 부모 대기
+	/* ----------------종료된 상태 ------------------*/
     int exit_status = child->exit_status;
     list_remove(&child->child_elem);
-    sema_up(&child->free_sema); // 자식 프로세스 종료되고 종료상태 됐으니 sema up
+    sema_up(&child->free_sema); // 자식 프로세스 종료됐으니 sema up
 
-    return exit_status;
-    
+    return exit_status;   
 }
 
 /* Exit the process. This function is called by thread_exit (). */
@@ -343,7 +333,7 @@ void process_exit (void) {
     {
         close(i);
     }
-    palloc_free_multiple(curr->fd_table, FDT_PAGES);
+    palloc_free_multiple(curr->fd_table, FDT_PAGES); // thread_create에서 할당한 페이지 해제
     file_close(curr->running); // 현재 프로세스가 실행중인 파일 종료
 
     process_cleanup ();
@@ -451,10 +441,11 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
 // ************** Project 2-1 : User Programs - Argument Passing
 void argument_stack(char **argv, int argc, struct intr_frame *if_){
     char *arg_address[128];
+	int argv_len;
     // 1. 스택 공간 확보 및 복사
     for(int i = argc - 1; i >= 0; i--){
-        int argv_len = strlen(argv[i]) + EOL; // EOL(Sentinel) 포함한 길이를 변수에 저장
-        if_->rsp -= (argv_len); // 받아온 길이 만큼 스택 크기를 늘려줌
+        argv_len = strlen(argv[i]) + EOL; // EOL(Sentinel) 포함한 길이를 변수에 저장
+        if_->rsp -= (argv_len); // 받아온 길이 만큼 스택 올리고
         memcpy(if_->rsp, argv[i], argv_len); // 늘려준 스택 공간에 해당 인자를 복사
         arg_address[i] = if_->rsp; // arg_address에 인자를 복사한 시작 주소값을 저장해준다
     }
@@ -502,7 +493,7 @@ bool load (const char *file_name, struct intr_frame *if_) {
 	t->pml4 = pml4_create ();
 	if (t->pml4 == NULL)
 		goto done;
-	process_activate (thread_current ());
+	process_activate (thread_current ()); // tss_update()
 
 	/* Open executable file. */
 	file = filesys_open (file_name);
@@ -517,7 +508,6 @@ bool load (const char *file_name, struct intr_frame *if_) {
 
     /* 현재 오픈한 파일에 다른내용 쓰지 못하게 함 */
     file_deny_write(file);
-    
 
 	/* Read and verify executable header. */
 	if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
@@ -619,8 +609,6 @@ struct thread *get_child(int pid){
     }
     return NULL;
 }
-
-
 
 /* Checks whether PHDR describes a valid, loadable segment in
  * FILE and returns true if so, false otherwise. */

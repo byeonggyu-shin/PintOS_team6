@@ -78,7 +78,7 @@ void syscall_handler (struct intr_frame *f UNUSED) {
     
     // ************** Project 2-2-1: User Programs - System Call - Basics
     // Defined @ include/lib/syscall-nr.h
-    int sys_number = f -> R.rax; // 유저 스택에 저장되어 있는 시스템 콜 번호를 sys_number 변수에 저장
+    int sys_number = f -> R.rax; // 시스템 콜 번호
 
     switch(sys_number){
         case SYS_HALT: // Halt the operating system.
@@ -175,7 +175,6 @@ bool remove (const char *file) {
 // System Call : fork(), exec(), wait()
 // SYS_FORK : Clone current process. (자식 프로세스 생성)
 tid_t fork (const char *thread_name, struct intr_frame *f) {
-    // check_address(thread_name);
     return process_fork(thread_name, f);
 }
 
@@ -186,14 +185,13 @@ int wait(tid_t pid){
 
 // SYS_EXEC : Switch current process.
 tid_t exec(char *file_name){ // 현재 프로세스를 command line에서 지정된 인수를 전달하여 이름이 지정된 실행 파일로 변경
-    // printf(" syscall - exec activated");
     check_address(file_name);
-    int size = strlen(file_name) + 1;
     char *fn_copy = palloc_get_page(PAL_ZERO);
+
     if (fn_copy == NULL){
         exit(-1);
     }
-    strlcpy (fn_copy, file_name, size);
+    strlcpy (fn_copy, file_name, strlen(file_name) + 1);
 
     if (process_exec(fn_copy) == -1){
         return -1;
@@ -285,7 +283,7 @@ int filesize(int fd){
 - 파일 디스크립터가 0이 아닐 경우 파일의 데이터를 크기만큼 저장 후 읽은 바이트 수를 리턴*/
 int read(int fd, void *buffer, unsigned size){
     check_address(buffer);
-    // check_address(buffer+size-1);
+    check_address(buffer+size-1);
     int read_count; // 글자수 카운트 용(for문 사용하기 위해)
 
     struct file *file_obj = find_file_by_fd(fd);
@@ -355,11 +353,14 @@ unsigned tell(int fd){
 
 void close(int fd){
     // printf(" syscall - close activated");
-    if (fd <= 1) return;
+    if (fd < 2) {
+        return;
+    }
     struct file *file_obj = find_file_by_fd(fd);
 
     if (file_obj == NULL){
         return;
     }
+    file_close(file_obj);
     remove_file_from_fdt(fd);
 }
