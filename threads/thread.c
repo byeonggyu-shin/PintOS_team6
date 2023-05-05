@@ -778,13 +778,3 @@ void test_max_priority(void) {
 		thread_yield();
 }
 
-struct thread* get_child_by_tid(tid_t tid){
-	struct thread *curr = thread_current();
-	struct thread *child;
-	struct list_elem *e;
-	for(e = list_begin(&curr->child_list); list_end(&curr->child_list); e = list_next(e)){
-		child = list_entry(e, struct thread, child_elem);
-		if (child->tid == tid)break;
-	}
-	return child;
-}

@@ -12,7 +12,6 @@
 #include "vm/vm.h"
 #endif
 
-
 /* States in a thread's life cycle. */
 enum thread_status {
 	THREAD_RUNNING,     /* Running thread. */
@@ -118,15 +117,18 @@ struct thread {
 		우선 순위를 donate한 스레드의 donations 리스트에 연결*/
 	struct list_elem d_elem; 
 
-	int exit_status;	 	/* to give child exit_status to parent */
-	int fd_idx;                     /* for open file's fd in fd_table */
-	struct intr_frame parent_if;	/* Information of parent's frame */
-	struct list child_list; /* list of threads that are made by this thread */
-	struct list_elem child_elem; /* elem for this thread's parent's child_list */
-	struct semaphore fork_sema; /* parent thread should wait while child thread copy parent */
+	int exit_status;	 	                /* 자식 프로세스가  */
+
+	int fd_idx;                         /* for open file's fd in fd_table */
+	struct intr_frame parent_if;	      /* Information of parent's frame */
+	struct list child_list;             /* list of threads that are made by this thread */
+	struct list_elem child_elem;        /* elem for this thread's parent's child_list */
+
+	struct semaphore fork_sema;         /* parent thread should wait while child thread copy parent */
 	struct semaphore wait_sema;
 	struct semaphore free_sema;
-	struct file **fd_table;   /* allocated in thread_create */	
+
+	struct file **fd_table;             /* allocated in thread_create */	
 	struct file *running;
 
 #ifdef USERPROG
@@ -192,5 +194,8 @@ bool cmp_priority (const struct list_elem *a, const struct list_elem *b, void *a
 void donate_priority(void);
 void remove_with_lock(struct lock *lock);
 void refresh_priority(void);
+
+
+struct thread* get_child_by_tid(tid_t tid);
 
 #endif /* threads/thread.h */

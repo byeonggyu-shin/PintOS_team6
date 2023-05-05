@@ -27,9 +27,8 @@ static bool load (const char *file_name, struct intr_frame *if_);
 static void initd (void *f_name);
 static void __do_fork (void *);
 
-struct thread *get_child_process (int pid);
-
 void argument_stack(char **argv, int argc, struct intr_frame *_if);
+
 /* General process initializer for initd and other process. */
 /*  initd 및 기타 프로세스에 대한 일반 프로세스 이니셜라이저 */
 static void 
@@ -254,24 +253,30 @@ process_exec (void *f_name) {
  *
  * This function will be implemented in problem 2-2.  For now, it
  * does nothing. */
+/* 스레드 TID가 소멸될 때까지 기다렸다가 종료 상태를 반환합니다.
+커널에 의해 종료된 경우(예외로 인해 종료된 경우) -1을 반환합니다.
+TID가 잘못되었거나 호출 프로세스의 자식이 아니거나 지정된 TID에 대해 
+process_wait()가 이미 호출된 경우 대기하지 않고 -1을 즉시 반환 */
 int
 process_wait (tid_t child_tid UNUSED) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
 
-	struct thread *curr = thread_current();
-	struct thread *child = get_child_by_tid(child_tid);
-
-	if (child == NULL) {
-		return -1;
+	struct thread *curr = thread_current();                   /* 실행 중인 스레드를 가져옵 */
+	struct thread *child = get_child_by_tid(child_tid);       /* 자식 스레드 탐색 */
+ 
+ 	if (child == NULL) {                                      /* 자식 스레드를 찾지 못한 경우 */
+ 		return -1;
 	}
 	
-	sema_down(&child->wait_sema);
-	int exit_status = child->exit_status;
-	list_remove(&child->child_elem);
-	sema_up(&child->free_sema);
-	return exit_status;
+	sema_down(&child->wait_sema);                             /* 자식 종료 대기 */
+	int exit_status = child->exit_status;                     /* 자식 스레드의 종료 상태 할당 */
+	list_remove(&child->child_elem);                          /* 자식 스레드 목록에서 해당 스레드 제거 */
+	sema_up(&child->free_sema);                               /* 자식 스레드의 자원 해체를 위해 세마포어 증가 */
+
+	return exit_status;                                       /* 자식 스레드의 종료 상태 반환 */
+
 }
 
 /* Exit the process. This function is called by thread_exit (). */
@@ -774,9 +779,22 @@ argument_stack(char **argv, int argc, struct intr_frame *_if){
 	memset(_if -> rsp, 0, PTR_SIZE);
 }
 
-struct thread *get_child_process (int pid)
-{
-/* 자식 리스트에 접근하여 프로세스 디스크립터 검색 */
-/* 해당 pid가 존재하면 프로세스 디스크립터 반환 */
-/* 리스트에 존재하지 않으면 NULL 리턴 */
+/* 주어진 tid를 가진 자식 스레드를 찾는 함수 */
+struct thread* get_child_by_tid(tid_t tid){
+	struct thread *curr = thread_current();                        
+	struct thread *child;                                          /* 자식 스레드에 대한 포인터를 선언 */
+	struct list *child_list = &curr->child_list;                   /* 현재 스레드의 자식 스레드 목록 */
+	struct list_elem *e;                                           /* 리스트 요소에 대한 포인터를 선언 */
+
+	if (list_empty(child_list)) {                                  
+		return NULL;           
+	}
+
+	for(e = list_begin(child_list); e != list_end(child_list); e = list_next(e)){
+		child = list_entry(e, struct thread, child_elem);            /* 현재 리스트 요소에서 스레드 구조체 할당 */
+		if (child->tid == tid) {                                     
+			return child;
+		}
+	}
+	return NULL;
 }
