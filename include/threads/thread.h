@@ -5,12 +5,11 @@
 #include <list.h>
 #include <stdint.h>
 #include "threads/interrupt.h"
-
 #include "threads/synch.h"
-
 #ifdef VM
 #include "vm/vm.h"
 #endif
+
 
 /* States in a thread's life cycle. */
 enum thread_status {
@@ -30,13 +29,10 @@ typedef int tid_t;
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
 
-/* USERPROG 매크로 */
-#define USERPROG
-/* pages to allocate for file descriptor tables (thread_create, process_exit) */
-#define FDT_PAGES 3		
-/* limit fd_idx */
-#define FDCOUNT_LIMIT FDT_PAGES *(1 << 9)		
-
+/* ------------------ project2 -------------------- */
+#define FDT_PAGES 3		/* pages to allocate for file descriptor tables (thread_create, process_exit) */
+#define FDCOUNT_LIMIT FDT_PAGES *(1 << 9)		/* limit fd_idx */
+/* ------------------------------------------------ */
 
 /* A kernel thread or user process.
  *
@@ -105,32 +101,27 @@ struct thread {
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
 
-	/* tick in which this thread needs to wake up */
-	int64_t wakeup_tick;
+	/* ----- PROJECT 1 --------- */
+	int64_t wake_up_tick; /* thread's wakeup_time */
+	int initial_priority; /* thread's initial priority */
+	struct lock *wait_on_lock; /* which lock thread is waiting for  */
+	struct list donation_list; /* list of threads that donate priority to **this thread** */
+	struct list_elem donation_elem; /* prev and next pointer of donation_list where **this thread donate** */
+	/* ------------------------- */
 
-	int original_priority;
-	struct lock *lock_to_wait_on;
-	/* list of threads that have donated their priorities to this thread */
-	/* priority를 donate한 스레드의 리스트 */
-	struct list donators_list;           
-	/* priority를 donate한 스레드들의 리스트를 관리하기 위한 element
-		우선 순위를 donate한 스레드의 donations 리스트에 연결*/
-	struct list_elem d_elem; 
-
-	int exit_status;	 	                /* 자식 프로세스가  */
-
-	int fd_idx;                         /* for open file's fd in fd_table */
-	struct intr_frame parent_if;	      /* Information of parent's frame */
-	struct list child_list;             /* list of threads that are made by this thread */
-	struct list_elem child_elem;        /* elem for this thread's parent's child_list */
-
-	struct semaphore fork_sema;         /* parent thread should wait while child thread copy parent */
-	struct semaphore wait_sema;
-	struct semaphore free_sema;
-
-	struct file **fd_table;             /* allocated in thread_create */	
+	/* ---------- Project 2 ---------- */
+	int exit_status;	 	/* to give child exit_status to parent */
+	int fd_idx;                     /* for open file's fd in fd_table */
+	struct intr_frame parent_if;	/* Information of parent's frame */
+	struct list child_list; /* list of threads that are made by this thread */
+	struct list_elem child_elem; /* elem for this thread's parent's child_list */
+	struct semaphore fork_sema; /* parent thread should wait while child thread copy parent */
+	struct file **fd_table;   /* allocated in thread_create */	
+	struct semaphore wait_sema; /* parent thread should wait for child's exit */
+	struct semaphore free_sema; /* child thread should wait for parent's finish wait */
 	struct file *running;
-
+	/* ------------------------------- */
+	
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
 	uint64_t *pml4;                     /* Page map level 4 */
@@ -179,23 +170,15 @@ int thread_get_load_avg (void);
 
 void do_iret (struct intr_frame *tf);
 
-void thread_sleep(int64_t ticks); /* 실행 중인 thread를 슬립으로 만듦 */
-void thread_awake(int64_t ticks); /* sleep_list에서 꺠워야 할 thread를 깨움 */
-void update_next_tick_to_awake(int64_t ticks); /* 최소 틱을 가진 thread 저장 */
-int64_t get_next_tick_to_awake(void); /* thread.c의 next_tick_to_awake 반환 */
-
-
-/* If the newly created thread has a higher priority than the running thread,
-   then the current running thread yields.
- */
-void test_max_priority(void);
-bool cmp_priority (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
-
-void donate_priority(void);
-void remove_with_lock(struct lock *lock);
-void refresh_priority(void);
-
-
+/* ------------- project 1 ------------ */
+void thread_sleep(int64_t ticks);
+void thread_awake(int64_t ticks);
+int64_t get_next_tick_to_awake(void);
+bool thread_priority_compare (struct list_elem *element1, struct list_elem *element2, void *aux);
+bool preempt_by_priority(void);
+bool thread_donate_priority_compare (struct list_elem *element1, struct list_elem *element2, void *aux);
+/* ------------------------------------- */
+/* ------------------- project 2 -------------------- */
 struct thread* get_child_by_tid(tid_t tid);
-
+/* -------------------------------------------------- */
 #endif /* threads/thread.h */

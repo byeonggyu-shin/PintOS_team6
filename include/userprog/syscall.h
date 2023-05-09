@@ -3,7 +3,8 @@
 
 void syscall_init (void);
 
-/* read(), write() 시스템 콜에서 파일 접근하기 전에 lock을 획득하도록 구현 */
-struct lock filesys_lock;
+/* -------- project2 ---------- */
+struct lock filesys_lock;   /* proventing race condition against  */
+/* ---------------------------- */
 
 #endif /* userprog/syscall.h */
