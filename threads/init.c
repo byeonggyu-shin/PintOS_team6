@@ -65,6 +65,7 @@ static void print_stats (void);
 int main (void) NO_RETURN;
 
 /* Pintos main program. */
+/* 다양한 하위 시스템 초기화 및 스케줄러 시작을 포함하는 Pintos OS의 부팅 프로세스 */
 int
 main (void) {
 	uint64_t mem_end;

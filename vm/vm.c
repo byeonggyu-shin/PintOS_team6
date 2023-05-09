@@ -172,6 +172,7 @@ vm_do_claim_page (struct page *page) {
 }
 
 /* Initialize new supplemental page table */
+/* 새 supplemental page table 초기화 */
 void
 supplemental_page_table_init (struct supplemental_page_table *spt UNUSED) {
 }
