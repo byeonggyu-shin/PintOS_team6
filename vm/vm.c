@@ -3,7 +3,7 @@
 #include "threads/malloc.h"
 #include "vm/vm.h"
 #include "vm/inspect.h"
-
+#include "lib/kernel/hash.h"
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
 void
@@ -63,12 +63,30 @@ err:
 /* Find VA from spt and return page. On error, return NULL. */
 struct page *
 spt_find_page (struct supplemental_page_table *spt UNUSED, void *va UNUSED) {
-	struct page *page = NULL;
 	/* TODO: Fill this function. */
+	struct page* page = (struct page*)malloc(sizeof(struct page));
 
-	return page;
+	page->va = pg_round_down(va); // PGMASK와 & 연산 해 오프셋 제거(VPN 추출)
+	struct hash_elem *e = hash_find (&spt->spt_hash_table, &page->hash_elem);
+
+	return e ? hash_entry(e, struct page, hash_elem) : NULL;
+}
+/* 해시 요소들 비교 */
+bool
+page_compare (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED)
+{
+	const struct page *a_p = hash_entry(a, struct page, hash_elem);
+	const struct page *b_p = hash_entry(b, struct page, hash_elem);
+
+	return a_p->va < b_p->va;
 }
 
+unsigned
+hash_func (const struct hash_elem *a, void *aux UNUSED)
+{
+	const struct page *p = hash_entry(a, struct page, hash_elem);
+	return hash_bytes (&p->va, sizeof(p->va));
+}
 /* Insert PAGE into spt with validation. */
 bool
 spt_insert_page (struct supplemental_page_table *spt UNUSED,
@@ -174,6 +192,7 @@ vm_do_claim_page (struct page *page) {
 /* Initialize new supplemental page table */
 void
 supplemental_page_table_init (struct supplemental_page_table *spt UNUSED) {
+	hash_init(&spt->spt_hash_table, hash_func, page_compare, NULL);
 }
 
 /* Copy supplemental page table from src to dst */
