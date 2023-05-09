@@ -79,6 +79,7 @@ main (void) {
 
 	/* Initialize ourselves as a thread so we can use locks,
 	   then enable console locking. */
+	   /* 스레드, 콘솔, 말록, 페이징, tss, gdt 등 초기화 */
 	thread_init ();
 	console_init ();
 

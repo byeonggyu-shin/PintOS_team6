@@ -3,11 +3,17 @@
 
 #include <list.h>
 #include <stdbool.h>
-
+#define MAX_DONATION_DEPTH 8
 /* A counting semaphore. */
 struct semaphore {
 	unsigned value;             /* Current value. */
 	struct list waiters;        /* List of waiting threads. */
+};
+
+/* One semaphore in a list. */
+struct semaphore_elem {
+	struct list_elem elem;              /* List element. */
+	struct semaphore semaphore;         /* This semaphore. */
 };
 
 void sema_init (struct semaphore *, unsigned value);
@@ -37,6 +43,9 @@ void cond_init (struct condition *);
 void cond_wait (struct condition *, struct lock *);
 void cond_signal (struct condition *, struct lock *);
 void cond_broadcast (struct condition *, struct lock *);
+
+bool cmp_sema_priority (const struct list_elem *a, const struct list_elem *b, void *aux);
+bool cmp_donor_priority (const struct list_elem *new, const struct list_elem *existing, void *aux);
 
 /* Optimization barrier.
  *
